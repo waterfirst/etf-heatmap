@@ -140,7 +140,18 @@
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <input id="pin" type="password" inputmode="numeric" placeholder="비밀번호 입력 후 Enter" autocomplete="off" style="width:200px">
           <button class="btn" id="unlockbtn" type="button">잠금 해제 ▶</button>
+          <button class="btn sec" id="adminbtn" type="button">관리자</button>
           <button class="btn sec" id="advtoggle" type="button">키 직접 입력</button>
+        </div>
+        <div id="adminbox" style="display:none;margin-top:8px">
+          <div class="small" style="margin-bottom:6px">관리자 비밀번호로 <b>접속 비밀번호를 변경</b>합니다. (현재 접속 비밀번호로 키를 다시 암호화)</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <input id="adminpw" type="password" placeholder="관리자 비밀번호" autocomplete="off" style="width:130px">
+            <input id="curpw" type="password" placeholder="현재 접속 비밀번호" autocomplete="off" style="width:150px">
+            <input id="newpw" type="password" placeholder="새 접속 비밀번호" autocomplete="off" style="width:150px">
+            <button class="btn" id="changepwbtn" type="button">비밀번호 변경</button>
+          </div>
+          <div id="adminout" class="small" style="margin-top:6px;word-break:break-all;white-space:pre-wrap"></div>
         </div>
         <div id="advbox" style="display:none;margin-top:8px">
           <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
@@ -894,14 +905,17 @@ async function encryptKey(plain,pin){
   const out=new Uint8Array(16+12+ct.length); out.set(salt,0); out.set(iv,16); out.set(ct,28);
   return bytesToB64(out);
 }
+const ADMIN_PW='0405';  // 관리자 비밀번호(접속 비밀번호 변경용). 코드에 노출되나, 변경은 현재 접속 비밀번호를 알아야만 가능.
+// 현재 활성 암호문: 비밀번호를 바꾸면 localStorage('etf_enc')에 저장되어 우선 사용. 없으면 코드의 ENC_KEY(기본).
+function activeBlob(){ return localStorage.getItem('etf_enc') || ENC_KEY; }
 async function doUnlock(){
   const pin=$('pin').value.trim();
   if(!pin){setStatus('비밀번호를 입력하세요.',true);return;}
-  if(!ENC_KEY){setStatus('암호화된 키가 없습니다. [키 직접 입력]에서 키를 넣고 암호문을 생성해 코드의 ENC_KEY에 넣으세요.',true);return;}
+  if(!activeBlob()){setStatus('암호화된 키가 없습니다. [키 직접 입력]에서 키를 넣고 암호문을 생성해 코드의 ENC_KEY에 넣으세요.',true);return;}
   if(!(window.crypto&&crypto.subtle)){setStatus('이 브라우저/환경에서 복호화를 쓸 수 없습니다(https 또는 localhost 필요).',true);return;}
   setStatus('잠금 해제 중…');
   try{
-    const k=await decryptKey(ENC_KEY,pin);
+    const k=await decryptKey(activeBlob(),pin);
     $('apikey').value=k; $('pin').value='';
     loadTicker();
     await run();
@@ -919,6 +933,25 @@ $('genbtn').onclick=async()=>{
     $('genout').textContent='↓ index.html 의 ENC_KEY 값을 아래로 교체하고 push 하세요 (비밀번호: '+pin+')\n'+blob;
   }catch(e){ setStatus('암호문 생성 실패: '+e.message,true); }
 };
+// ===== 관리자: 접속 비밀번호 변경 =====
+$('adminbtn').onclick=()=>{ const b=$('adminbox'); b.style.display=(b.style.display==='none'?'block':'none'); };
+async function changePassword(){
+  if($('adminpw').value.trim()!==ADMIN_PW){setStatus('관리자 비밀번호가 올바르지 않습니다.',true);return;}
+  const cur=$('curpw').value.trim(), neu=$('newpw').value.trim();
+  if(!cur||!neu){setStatus('현재/새 접속 비밀번호를 모두 입력하세요.',true);return;}
+  if(!(window.crypto&&crypto.subtle)){setStatus('이 환경에서는 변경할 수 없습니다(https 또는 localhost 필요).',true);return;}
+  let plain;
+  try{ plain=await decryptKey(activeBlob(),cur); }
+  catch(e){ setStatus('현재 접속 비밀번호가 올바르지 않습니다.',true); return; }
+  try{
+    const blob=await encryptKey(plain,neu);
+    localStorage.setItem('etf_enc',blob);
+    $('adminpw').value='';$('curpw').value='';$('newpw').value='';
+    $('adminout').textContent='✔ 접속 비밀번호를 변경했습니다 (이 브라우저에 저장, 즉시 적용).\n모든 기기·GitHub 배포에 영구 적용하려면 아래 줄로 index.html 의 ENC_KEY 를 교체하고 push 하세요:\nconst ENC_KEY = "'+blob+'";';
+    setStatus('접속 비밀번호가 변경되었습니다. 다음부터 새 비밀번호로 잠금 해제하세요.');
+  }catch(e){ setStatus('변경 실패: '+e.message,true); }
+}
+$('changepwbtn').onclick=changePassword;
 
 // ===== 테마(다크/라이트) =====
 function applyTheme(t){
