@@ -59,7 +59,8 @@
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;
     padding:14px 16px;margin-bottom:16px}
   .panel h2{margin:0 0 10px;font-size:15px}
-  #treemap{width:100%;height:560px;background:var(--panel2);border-radius:10px;overflow:hidden}
+  #treemap{width:100%;height:min(560px,72vh);background:var(--panel2);border-radius:10px;overflow:hidden}
+  #risers,#fulltable{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .cell text{pointer-events:none;font-family:inherit}
   .cell rect{stroke:var(--bg);stroke-width:1.5;cursor:pointer}
   .cell:hover rect{stroke:#e2e8f0;stroke-width:2}
@@ -93,6 +94,26 @@
   .mactions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
   .summary{margin-top:14px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;line-height:1.7}
   .summary b{color:var(--text)}
+  /* 반응형 (모바일) */
+  @media (max-width:680px){
+    header{padding:10px 14px;gap:8px}
+    header h1{font-size:17px}
+    header .sub{font-size:11px}
+    .wrap{padding:12px}
+    .ticker{gap:16px;padding:8px 14px}
+    .tk .pr{font-size:15px}
+    .controls{padding:12px}
+    .row{gap:10px}
+    .fld.grow{flex:1 1 100%;min-width:0}
+    .fld input.wide{min-width:0;width:100%}
+    #pin{width:100%}
+    .group{flex:1 1 100%}
+    .panel{padding:12px}
+    #treemap{height:60vh;min-height:340px}
+    .modal{padding:14px 12px}
+    th,td{padding:6px 7px;font-size:11.5px}
+    .btn{padding:9px 14px}
+  }
 </style>
 </head>
 <body>
@@ -108,12 +129,19 @@
   <div class="controls">
     <div class="row" style="margin-bottom:12px">
       <div class="fld grow">
-        <label>공공데이터포털 서비스키 (Decoding) · 이 브라우저에만 저장됩니다. 코드/저장소엔 넣지 마세요</label>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <input id="apikey" class="wide" type="password" placeholder="서비스키를 입력하세요" autocomplete="off">
-          <button class="btn sec" id="keytoggle" type="button" style="padding:7px 12px">보기</button>
-          <button class="btn sec" id="keysave" type="button" style="padding:7px 12px">키 저장</button>
-          <input id="unlockpw" type="password" placeholder="비밀번호 입력 후 Enter → 키 불러오기" autocomplete="off" style="width:200px">
+        <label>🔒 비밀번호로 시작 (서비스키는 암호화되어 코드에 저장됨)</label>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <input id="pin" type="password" inputmode="numeric" placeholder="비밀번호 입력 후 Enter" autocomplete="off" style="width:200px">
+          <button class="btn" id="unlockbtn" type="button">잠금 해제 ▶</button>
+          <button class="btn sec" id="advtoggle" type="button">키 직접 입력</button>
+        </div>
+        <div id="advbox" style="display:none;margin-top:8px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <input id="apikey" class="wide" type="password" placeholder="서비스키 직접 입력 (선택)" autocomplete="off">
+            <button class="btn sec" id="keytoggle" type="button" style="padding:7px 12px">보기</button>
+            <button class="btn sec" id="genbtn" type="button" style="padding:7px 12px">이 키+비번으로 암호문 생성</button>
+          </div>
+          <div id="genout" class="small" style="margin-top:6px;word-break:break-all"></div>
         </div>
       </div>
       <div class="fld">
@@ -201,6 +229,8 @@ const API_BASE = 'https://apis.data.go.kr/1160100/service/GetSecuritiesProductIn
 const STOCK_BASE = 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo';
 const SERVED = location.protocol.startsWith('http');  // http(s)로 서빙 중인지 (file:// 경고용)
 const ONLOCAL = (location.hostname==='localhost' || location.hostname==='127.0.0.1');  // 로컬 프록시 서버일 때만 proxy 경유
+// AES-GCM(PBKDF2/SHA-256, 25만회)로 암호화된 공공데이터포털 서비스키. 비밀번호로만 복호화됨.
+const ENC_KEY = "FwAp7HsA746ENTeyz8bBdRg5PxhHvj4q9OCyuUADXAxFiULhWmzbDe3lYVbu0muuKGUZ7tRH+qP/S2gff8Ic8wOh38zgHOF/xR7tm3IKP2ZhUyR81xhB0lRPEtYHnjkuDX/ZLlTsYAEcaIFpY7kuDkIBzSXmpCw4WejCjfi33552FoLC";
 
 // ---------- helpers ----------
 const $ = id => document.getElementById(id);
@@ -211,7 +241,7 @@ function num(v){const n=parseFloat(String(v).replace(/,/g,''));return isNaN(n)?n
 function setStatus(msg,err){const s=$('status');s.textContent=msg;s.className='status'+(err?' err':'');}
 
 // ---------- settings persistence ----------
-const SKEYS=['apikey','w1w','w2w','w1m','w3m','w6m','minvol','minval','topn','cmpdays'];
+const SKEYS=['w1w','w2w','w1m','w3m','w6m','minvol','minval','topn','cmpdays'];
 function todayStr(){const t=new Date();return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;}
 function loadSettings(){
   SKEYS.forEach(k=>{const v=localStorage.getItem('etfset_'+k);if(v!==null)$(k).value=v;});
@@ -781,34 +811,53 @@ async function loadTicker(){
   }
 }
 
-// 서비스키 보기/숨김
+// ===== 비밀번호로 암호화된 서비스키 복호화 (WebCrypto: AES-GCM + PBKDF2) =====
+const PBKDF2_ITER=250000;
+function b64ToBytes(b){const s=atob(b);const a=new Uint8Array(s.length);for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a;}
+function bytesToB64(a){let s='';for(const x of a)s+=String.fromCharCode(x);return btoa(s);}
+async function deriveAesKey(pin,salt,usages){
+  const base=await crypto.subtle.importKey('raw',new TextEncoder().encode(pin),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:PBKDF2_ITER,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,usages);
+}
+async function decryptKey(blobB64,pin){
+  const raw=b64ToBytes(blobB64);
+  const salt=raw.slice(0,16), iv=raw.slice(16,28), ct=raw.slice(28);
+  const key=await deriveAesKey(pin,salt,['decrypt']);
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv},key,ct);
+  return new TextDecoder().decode(pt);
+}
+async function encryptKey(plain,pin){
+  const salt=crypto.getRandomValues(new Uint8Array(16)), iv=crypto.getRandomValues(new Uint8Array(12));
+  const key=await deriveAesKey(pin,salt,['encrypt']);
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(plain)));
+  const out=new Uint8Array(16+12+ct.length); out.set(salt,0); out.set(iv,16); out.set(ct,28);
+  return bytesToB64(out);
+}
+async function doUnlock(){
+  const pin=$('pin').value.trim();
+  if(!pin){setStatus('비밀번호를 입력하세요.',true);return;}
+  if(!ENC_KEY){setStatus('암호화된 키가 없습니다. [키 직접 입력]에서 키를 넣고 암호문을 생성해 코드의 ENC_KEY에 넣으세요.',true);return;}
+  if(!(window.crypto&&crypto.subtle)){setStatus('이 브라우저/환경에서 복호화를 쓸 수 없습니다(https 또는 localhost 필요).',true);return;}
+  setStatus('잠금 해제 중…');
+  try{
+    const k=await decryptKey(ENC_KEY,pin);
+    $('apikey').value=k; $('pin').value='';
+    loadTicker();
+    await run();
+  }catch(e){ setStatus('비밀번호가 올바르지 않습니다.',true); }
+}
+$('unlockbtn').onclick=doUnlock;
+$('pin').addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ev.preventDefault();doUnlock();} });
+$('advtoggle').onclick=()=>{ const b=$('advbox'); b.style.display=(b.style.display==='none'?'block':'none'); };
 $('keytoggle').onclick=()=>{const i=$('apikey');const b=$('keytoggle');
   if(i.type==='password'){i.type='text';b.textContent='숨김';}else{i.type='password';b.textContent='보기';}};
-$('apikey').addEventListener('change',()=>{saveSettings();loadTicker();});
-
-// ===== 비밀번호로 키 저장/불러오기 (키는 이 브라우저 localStorage 에만 저장. 저장소/코드엔 없음) =====
-const UNLOCK_PW='7688';
-function encKey(s){try{return btoa(unescape(encodeURIComponent(s)));}catch(e){return '';}}
-function decKey(s){try{return decodeURIComponent(escape(atob(s)));}catch(e){return '';}}
-$('keysave').onclick=()=>{
-  const k=$('apikey').value.trim();
-  if(!k){setStatus('먼저 서비스키를 입력한 뒤 [키 저장]을 누르세요.',true);return;}
-  localStorage.setItem('etf_savedkey',encKey(k));
-  localStorage.removeItem('etf_unlockpw');  // 구버전(1234) 흔적 제거
-  saveSettings();
-  setStatus('이 브라우저에 키를 저장했습니다. 다음부터 비밀번호를 입력하고 Enter로 불러올 수 있어요.');
+$('genbtn').onclick=async()=>{
+  const k=$('apikey').value.trim(); const pin=($('pin').value.trim()||'7688');
+  if(!k){setStatus('먼저 [키 직접 입력]에 서비스키를 넣으세요.',true);return;}
+  try{ const blob=await encryptKey(k,pin);
+    $('genout').textContent='↓ index.html 의 ENC_KEY 값을 아래로 교체하고 push 하세요 (비밀번호: '+pin+')\n'+blob;
+  }catch(e){ setStatus('암호문 생성 실패: '+e.message,true); }
 };
-$('unlockpw').addEventListener('keydown',ev=>{
-  if(ev.key!=='Enter')return;
-  ev.preventDefault();
-  if($('unlockpw').value!==UNLOCK_PW){setStatus('비밀번호가 올바르지 않습니다.',true);$('unlockpw').value='';return;}
-  const saved=localStorage.getItem('etf_savedkey');
-  if(!saved){setStatus('저장된 키가 없습니다. 먼저 키를 입력하고 [키 저장]을 누르세요.',true);return;}
-  $('apikey').value=decKey(saved);
-  $('unlockpw').value='';
-  saveSettings(); loadTicker();
-  setStatus('저장된 서비스키를 불러왔습니다. [모멘텀 계산하기]를 누르세요.');
-});
 
 // ===== 테마(다크/라이트) =====
 function applyTheme(t){
@@ -832,7 +881,8 @@ syncLevBtn();
 loadTicker();
 if(_tkTimer)clearInterval(_tkTimer);
 _tkTimer=setInterval(loadTicker,30000);
-setStatus((SERVED?'':'⚠ file:// 로 직접 열면 공공데이터포털 CORS로 데이터가 안 옵니다. start.bat 으로 여세요. ')+'서비스키를 입력하고 [모멘텀 계산하기]를 누르세요.', !SERVED);
+$('pin').focus();
+setStatus((SERVED?'':'⚠ file:// 직접 열기는 데이터가 제한될 수 있어요. start.bat 권장. ')+(ENC_KEY?'비밀번호를 입력하고 Enter 를 누르면 자동으로 시작합니다.':'키 미설정: [키 직접 입력]에서 설정하세요.'), !SERVED);
 </script>
 </body>
 </html>
