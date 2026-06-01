@@ -80,6 +80,11 @@
   .secbtn.active{background:var(--accent);border-color:var(--accent);color:#fff}
   .secbtn .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
   .secbtn .cnt{opacity:.7}
+  .tabbar{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  .tabbtn{background:transparent;border:none;border-bottom:2px solid transparent;color:var(--muted);
+    padding:9px 18px;font-size:14px;font-weight:600;cursor:pointer}
+  .tabbtn:hover{color:var(--text)}
+  .tabbtn.active{color:var(--text);border-bottom-color:var(--accent)}
   details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8px}
   .small{font-size:11px;color:var(--muted)}
   /* modal */
@@ -200,6 +205,12 @@
     <div class="status" id="status"></div>
   </div>
 
+  <div class="tabbar">
+    <button class="tabbtn active" id="tab-main-btn" type="button">메인</button>
+    <button class="tabbtn" id="tab-lab-btn" type="button">🧪 실험실</button>
+  </div>
+
+  <div id="tab-main">
   <div class="panel">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
       <h2 style="margin:0">히트맵</h2>
@@ -226,6 +237,28 @@
       <summary>전체 순위 표 (펼치기 / 열 머리글 클릭 시 정렬)</summary>
       <div id="fulltable" style="margin-top:10px"></div>
     </details>
+  </div>
+  </div><!-- /tab-main -->
+
+  <div id="tab-lab" style="display:none">
+    <div class="panel">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+        <h2 style="margin:0">🧪 실험실</h2>
+        <label class="small">그래프
+          <select id="labtype" style="margin-left:6px">
+            <option value="scatter">산점도: 1개월수익률 × 모멘텀 (섹터색)</option>
+            <option value="bubble">버블: 3개월 × 6개월 수익률 (크기=거래대금)</option>
+            <option value="box">박스플롯: 섹터별 등락률 분포</option>
+            <option value="bar">막대: 섹터별 평균 모멘텀</option>
+            <option value="corr">상관 히트맵: 기간 수익률</option>
+            <option value="hist">히스토그램: 순위 변동 분포</option>
+          </select>
+        </label>
+        <button class="btn sec" id="labrefresh" type="button">새로고침</button>
+        <span class="small">메인에서 데이터를 불러온 뒤 표시됩니다. 마음에 들면 메인으로 옮겨드릴게요.</span>
+      </div>
+      <div id="labplot" style="min-height:560px"></div>
+    </div>
   </div>
 </div>
 
@@ -629,6 +662,7 @@ async function run(){
     renderHeatmap();
     renderRisers(nowList);
     _fullData=top; _sortKey='rankNow'; _sortAsc=true; renderFull();
+    if($('tab-lab') && $('tab-lab').style.display!=='none') renderLab();
 
     setStatus(`완료 · 확정일 ${now.base.basDt} · 대상 ${nowList.length}종목 중 상위 ${top.length} 표시 · 비교기준 ${prev.base?prev.base.basDt:'N/A'}`);
   }catch(err){
@@ -953,11 +987,107 @@ async function changePassword(){
 }
 $('changepwbtn').onclick=changePassword;
 
+// ================= 실험실 (Plotly.js, CDN 지연 로드) =================
+let _plotlyLoading=null;
+function ensurePlotly(){
+  if(window.Plotly) return Promise.resolve();
+  if(_plotlyLoading) return _plotlyLoading;
+  _plotlyLoading=new Promise((res,rej)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.plot.ly/plotly-2.30.0.min.js';
+    s.onload=()=>res(); s.onerror=()=>rej(new Error('Plotly 로드 실패(CDN 차단 가능)'));
+    document.head.appendChild(s);
+  });
+  return _plotlyLoading;
+}
+function pearson(a,b){
+  const n=a.length; if(n<2) return 0;
+  let sa=0,sb=0; for(let i=0;i<n;i++){sa+=a[i];sb+=b[i];}
+  const ma=sa/n, mb=sb/n; let num=0,da=0,db=0;
+  for(let i=0;i<n;i++){const x=a[i]-ma,y=b[i]-mb;num+=x*y;da+=x*x;db+=y*y;}
+  return (da&&db)? num/Math.sqrt(da*db) : 0;
+}
+function labTheme(){
+  const dark=!document.body.classList.contains('light');
+  return {font:{color:dark?'#e2e8f0':'#0f172a'}, grid:dark?'rgba(148,163,184,.18)':'rgba(100,116,139,.25)'};
+}
+const LAB_COLORWAY=['#3b82f6','#ef4444','#22c55e','#f59e0b','#a855f7','#ec4899','#14b8a6','#eab308','#c084fc','#94a3b8','#92744e','#38bdf8'];
+async function renderLab(){
+  const host=$('labplot');
+  if(!_allData.length){host.innerHTML='<div class="small" style="padding:24px">먼저 [메인]에서 비밀번호로 데이터를 불러오세요.</div>';return;}
+  host.innerHTML='<div class="small" style="padding:24px">그래프 그리는 중…</div>';
+  let P; try{ await ensurePlotly(); P=window.Plotly; }
+  catch(e){ host.innerHTML='<div class="small" style="padding:24px;color:#fca5a5">Plotly 로드 실패: '+e.message+'</div>'; return; }
+  const th=labTheme();
+  const layout={paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:th.font,colorway:LAB_COLORWAY,
+    height:560,margin:{t:50,r:24,b:60,l:66},legend:{font:th.font}};
+  const ax=(title)=>({title:{text:title},gridcolor:th.grid,zerolinecolor:th.grid});
+  const d=_allData, t=$('labtype').value;
+  const bySec=()=>{const m={};d.forEach(e=>{(m[e.sector]=m[e.sector]||[]).push(e);});return m;};
+  let traces=[];
+  if(t==='scatter'){
+    const m=bySec();
+    traces=Object.keys(m).map(sec=>({type:'scatter',mode:'markers',name:sec,
+      x:m[sec].map(e=>e.rets.w1m), y:m[sec].map(e=>e.score), text:m[sec].map(e=>e.name),
+      marker:{size:m[sec].map(e=>Math.max(6,Math.min(34,Math.sqrt((e.trPrc||0)/1e8)))),line:{width:0}},
+      hovertemplate:'%{text}<br>1개월 %{x:.1f}%<br>모멘텀 %{y:.0f}<extra>'+sec+'</extra>'}));
+    layout.title='1개월 수익률 × 모멘텀 점수 (색=섹터, 크기=거래대금)';
+    layout.xaxis=ax('1개월 수익률 %'); layout.yaxis=ax('모멘텀 점수');
+  } else if(t==='bubble'){
+    const m=bySec();
+    traces=Object.keys(m).map(sec=>({type:'scatter',mode:'markers',name:sec,
+      x:m[sec].map(e=>e.rets.w3m), y:m[sec].map(e=>e.rets.w6m), text:m[sec].map(e=>e.name),
+      marker:{size:m[sec].map(e=>Math.max(6,Math.min(40,Math.sqrt((e.trPrc||0)/1e8)))),line:{width:0}},
+      hovertemplate:'%{text}<br>3개월 %{x:.1f}%<br>6개월 %{y:.1f}%<extra>'+sec+'</extra>'}));
+    layout.title='3개월 × 6개월 수익률 (크기=거래대금)';
+    layout.xaxis=ax('3개월 수익률 %'); layout.yaxis=ax('6개월 수익률 %');
+  } else if(t==='box'){
+    traces=[{type:'box',x:d.map(e=>e.sector),y:d.map(e=>e.fltRt),boxpoints:'all',jitter:0.4,pointpos:0,
+      marker:{size:4,color:'#3b82f6'},line:{color:'#60a5fa'},name:'등락률'}];
+    layout.title='섹터별 등락률 분포'; layout.xaxis=ax('섹터'); layout.yaxis=ax('등락률 %'); layout.showlegend=false;
+  } else if(t==='bar'){
+    const m=bySec(); const order=Object.keys(m).map(s=>[s,m[s].reduce((a,e)=>a+e.score,0)/m[s].length,m[s].length]).sort((a,b)=>b[1]-a[1]);
+    traces=[{type:'bar',x:order.map(o=>o[0]),y:order.map(o=>o[1]),text:order.map(o=>o[2]+'종목'),textposition:'outside',
+      marker:{color:order.map(o=>sectorColor(o[0]))}}];
+    layout.title='섹터별 평균 모멘텀 점수'; layout.xaxis=ax('섹터'); layout.yaxis=ax('평균 모멘텀'); layout.showlegend=false;
+  } else if(t==='corr'){
+    const cols=['w1w','w2w','w1m','w3m','w6m'], labs=['1주','2주','1개월','3개월','6개월'];
+    const rows=d.filter(e=>cols.every(c=>e.rets[c]!=null));
+    const series=cols.map(c=>rows.map(e=>e.rets[c]));
+    const z=cols.map((_,i)=>cols.map((_,j)=>+pearson(series[i],series[j]).toFixed(2)));
+    traces=[{type:'heatmap',z,x:labs,y:labs,zmin:-1,zmax:1,
+      colorscale:[[0,'#2f74e0'],[0.5,'#0f1729'],[1,'#e0392f']],colorbar:{tickfont:th.font}}];
+    layout.title='기간 수익률 상관계수 ('+rows.length+'종목)';
+    layout.annotations=[];
+    for(let i=0;i<labs.length;i++)for(let j=0;j<labs.length;j++)layout.annotations.push({x:labs[j],y:labs[i],text:String(z[i][j]),showarrow:false,font:{color:'#fff',size:11}});
+    layout.xaxis={gridcolor:th.grid}; layout.yaxis={gridcolor:th.grid,autorange:'reversed'};
+  } else if(t==='hist'){
+    const vals=d.filter(e=>!e.isNew&&e.rankChange!=null).map(e=>e.rankChange);
+    traces=[{type:'histogram',x:vals,marker:{color:'#3b82f6'},nbinsx:30,name:'순위변동'}];
+    layout.title='순위 변동 분포 (양수=상승)'; layout.xaxis=ax('순위 변동 (이전−현재)'); layout.yaxis=ax('종목 수'); layout.showlegend=false;
+  }
+  host.innerHTML='';
+  P.newPlot(host,traces,layout,{responsive:true,displaylogo:false,modeBarButtonsToRemove:['lasso2d','select2d']});
+}
+function showTab(which){
+  const main=which==='main';
+  $('tab-main').style.display=main?'block':'none';
+  $('tab-lab').style.display=main?'none':'block';
+  $('tab-main-btn').classList.toggle('active',main);
+  $('tab-lab-btn').classList.toggle('active',!main);
+  if(!main) renderLab();
+}
+$('tab-main-btn').onclick=()=>showTab('main');
+$('tab-lab-btn').onclick=()=>showTab('lab');
+$('labtype').onchange=renderLab;
+$('labrefresh').onclick=renderLab;
+
 // ===== 테마(다크/라이트) =====
 function applyTheme(t){
   document.body.classList.toggle('light', t==='light');
   $('themebtn').textContent = t==='light' ? '☀️ 라이트' : '🌙 다크';
   if(_allData.length) renderHeatmap();  // 셀 외곽선 색이 테마를 따르므로 갱신
+  if($('tab-lab') && $('tab-lab').style.display!=='none') renderLab();
 }
 $('themebtn').onclick=()=>{
   const t=document.body.classList.contains('light')?'dark':'light';
