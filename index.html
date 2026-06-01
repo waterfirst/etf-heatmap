@@ -242,7 +242,8 @@
   <div class="panel">
     <details>
       <summary>전체 순위 표 (펼치기 / 열 머리글 클릭 시 정렬)</summary>
-      <div id="fulltable" style="margin-top:10px"></div>
+      <div id="fullsectorbar" class="secbar" style="margin-top:10px"></div>
+      <div id="fulltable" style="margin-top:6px"></div>
     </details>
   </div>
   </div><!-- /tab-main -->
@@ -643,9 +644,21 @@ function drawRisers(){
   });
 }
 
-let _fullData=[], _sortKey='rankNow', _sortAsc=true;
+let _fullData=[], _sortKey='rankNow', _sortAsc=true, _fullSector='all';
+function renderFullSectorBar(){
+  const counts={};
+  _fullData.forEach(e=>{const s=e.sector||'기타';counts[s]=(counts[s]||0)+1;});
+  let h='<button class="secbtn'+(_fullSector==='all'?' active':'')+'" data-sec="all">전체 <span class="cnt">'+_fullData.length+'</span></button>';
+  for(const sec of SECTORS){
+    if(!counts[sec.key]) continue;
+    h+='<button class="secbtn'+(_fullSector===sec.key?' active':'')+'" data-sec="'+sec.key+'"><span class="dot" style="background:'+sec.color+'"></span>'+sec.key+' <span class="cnt">'+counts[sec.key]+'</span></button>';
+  }
+  $('fullsectorbar').innerHTML=h;
+  $('fullsectorbar').querySelectorAll('.secbtn').forEach(b=>b.onclick=()=>{_fullSector=b.dataset.sec;renderFullSectorBar();renderFull();});
+}
 function renderFull(){
-  const data=_fullData.slice().sort((a,b)=>{
+  const filtered=_fullSector==='all'?_fullData:_fullData.filter(e=>(e.sector||'기타')===_fullSector);
+  const data=filtered.slice().sort((a,b)=>{
     let av=a[_sortKey],bv=b[_sortKey];
     if(av==null)av=_sortAsc?Infinity:-Infinity; if(bv==null)bv=_sortAsc?Infinity:-Infinity;
     return _sortAsc?av-bv:bv-av;
@@ -722,7 +735,7 @@ async function run(){
     _allData=nowList; _topN=topN;
     renderHeatmap();
     renderRisers(nowList);
-    _fullData=top; _sortKey='rankNow'; _sortAsc=true; renderFull();
+    _fullData=top; _sortKey='rankNow'; _sortAsc=true; _fullSector='all'; renderFullSectorBar(); renderFull();
     if($('tab-lab') && $('tab-lab').style.display!=='none') renderLab();
 
     setStatus(`완료 · 확정일 ${now.base.basDt} · 대상 ${nowList.length}종목 중 상위 ${top.length} 표시 · 비교기준 ${prev.base?prev.base.basDt:'N/A'}`);
@@ -1116,7 +1129,7 @@ function ensurePlotly(){
   if(_plotlyLoading) return _plotlyLoading;
   _plotlyLoading=new Promise((res,rej)=>{
     const s=document.createElement('script');
-    s.src='https://cdn.plot.ly/plotly-2.30.0.min.js';
+    s.src='https://cdn.plot.ly/plotly-2.35.2.min.js';
     s.onload=()=>res(); s.onerror=()=>rej(new Error('Plotly 로드 실패(CDN 차단 가능)'));
     document.head.appendChild(s);
   });
@@ -1324,7 +1337,11 @@ applyTheme(localStorage.getItem('etf_theme')||'dark');
 // ===== 히트맵 보기 기준 =====
 _view = localStorage.getItem('etf_view') || 'momentum';
 $('viewmode').value = _view;
-$('viewmode').onchange=()=>{ _view=$('viewmode').value; localStorage.setItem('etf_view',_view); if(_allData.length) renderHeatmap(); };
+$('viewmode').onchange=()=>{
+  _view=$('viewmode').value;
+  localStorage.setItem('etf_view',_view);
+  if(_allData.length){ renderHeatmap(); renderRisers(_allData); }
+};
 
 loadSettings();
 syncLevBtn();
@@ -1332,7 +1349,7 @@ loadTicker();
 if(_tkTimer)clearInterval(_tkTimer);
 _tkTimer=setInterval(loadTicker,30000);
 $('pin').focus();
-setStatus((SERVED?'':'⚠ file:// 직접 열기는 데이터가 제한될 수 있어요. start.bat 권장. ')+(ENC_KEY?'비밀번호를 입력하고 Enter 를 누르면 자동으로 시작합니다.':'키 미설정: [키 직접 입력]에서 설정하세요.'), !SERVED);
+setStatus((SERVED?'':'⚠ file:// 직접 열기는 데이터가 제한될 수 있어요. start.bat 권장. ')+(ENC_KEY?'비밀번호를 입력하고 Enter 를 누르면 자동으로 시작합니다.':'키가 설정되지 않았습니다.'), !SERVED);
 </script>
 </body>
 </html>
