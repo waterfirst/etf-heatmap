@@ -146,7 +146,7 @@
           <input id="pin" type="password" inputmode="numeric" placeholder="비밀번호 입력 후 Enter" autocomplete="off" style="width:200px">
           <button class="btn" id="unlockbtn" type="button">잠금 해제 ▶</button>
           <button class="btn sec" id="adminbtn" type="button">관리자</button>
-          <button class="btn sec" id="advtoggle" type="button">키 직접 입력</button>
+          <!-- 키 직접 입력 버튼 삭제 -->
         </div>
         <div id="adminbox" style="display:none;margin-top:8px">
           <div class="small" style="margin-bottom:6px">관리자 비밀번호로 <b>접속 비밀번호를 변경</b>합니다. (현재 접속 비밀번호로 키를 다시 암호화)</div>
@@ -159,12 +159,7 @@
           <div id="adminout" class="small" style="margin-top:6px;word-break:break-all;white-space:pre-wrap"></div>
         </div>
         <div id="advbox" style="display:none;margin-top:8px">
-          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-            <input id="apikey" class="wide" type="password" placeholder="서비스키 직접 입력 (선택)" autocomplete="off">
-            <button class="btn sec" id="keytoggle" type="button" style="padding:7px 12px">보기</button>
-            <button class="btn sec" id="genbtn" type="button" style="padding:7px 12px">이 키+비번으로 암호문 생성</button>
-          </div>
-          <div id="genout" class="small" style="margin-top:6px;word-break:break-all"></div>
+          <input id="apikey" type="hidden">
         </div>
       </div>
       <div class="fld">
@@ -173,16 +168,16 @@
       </div>
     </div>
     <div class="row">
-      <div class="group">
-        <div class="gl">모멘텀 가중치</div>
-        <div class="row">
+      <details class="group" style="border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+        <summary class="gl" style="cursor:pointer;user-select:none">모멘텀 가중치 (클릭하여 펼치기)</summary>
+        <div class="row" style="margin-top:8px">
           <div class="fld"><label>1주</label><input id="w1w" type="number" value="0"></div>
           <div class="fld"><label>2주</label><input id="w2w" type="number" value="0"></div>
           <div class="fld"><label>1개월</label><input id="w1m" type="number" value="12"></div>
           <div class="fld"><label>3개월</label><input id="w3m" type="number" value="4"></div>
           <div class="fld"><label>6개월</label><input id="w6m" type="number" value="2"></div>
         </div>
-      </div>
+      </details>
       <div class="group">
         <div class="gl">필터 / 표시</div>
         <div class="row">
@@ -238,8 +233,10 @@
   </div>
 
   <div class="panel">
-    <h2>🚀 순위 급상승 TOP</h2>
-    <div id="risers"></div>
+    <details open>
+      <summary style="cursor:pointer;user-select:none;font-size:15px;font-weight:700">🚀 순위 급상승 TOP (접기/펼치기)</summary>
+      <div id="risers" style="margin-top:10px"></div>
+    </details>
   </div>
 
   <div class="panel">
@@ -660,7 +657,7 @@ function renderFull(){
   for(const e of data){
     h+=`<tr><td>${e.rankNow}</td>
       <td><span class="chip ${changeCls(e)}">${changeLabel(e)}</span></td>
-      <td class="l">${e.name}</td><td>${e.code}</td>
+      <td class="l"><a href="#" class="etf-detail-link" data-code="${e.code}" style="color:var(--accent);text-decoration:underline;cursor:pointer">${e.name}</a></td><td>${e.code}</td>
       <td>${e.clpr!=null?e.clpr.toLocaleString():'-'}</td>
       <td class="${e.fltRt>0?'up':e.fltRt<0?'down':''}">${e.fltRt!=null?e.fltRt.toFixed(2)+'%':'-'}</td>
       <td>${e.trPrc!=null?(e.trPrc/1e8).toFixed(0):'-'}</td>
@@ -676,6 +673,15 @@ function renderFull(){
     if(k==='name'||k==='code') return;
     if(_sortKey===k)_sortAsc=!_sortAsc;else{_sortKey=k;_sortAsc=(k==='rankNow');}
     renderFull();
+  });
+  // ETF 이름 클릭 시 상세 모달 열기
+  $('fulltable').querySelectorAll('.etf-detail-link').forEach(a=>{
+    a.onclick=(ev)=>{
+      ev.preventDefault();
+      const code=a.dataset.code;
+      const etf=_fullData.find(e=>e.code===code);
+      if(etf) openDetail(etf);
+    };
   });
 }
 
