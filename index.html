@@ -73,6 +73,13 @@
   .chip{display:inline-block;padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700}
   .chip.up{background:rgba(239,68,68,.15)} .chip.down{background:rgba(59,130,246,.15)}
   .chip.new{background:rgba(168,85,247,.18)} .chip.flat{background:rgba(148,163,184,.15);color:var(--muted)}
+  .secbar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .secbtn{display:inline-flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--muted);border-radius:16px;padding:4px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
+  .secbtn:hover{color:var(--text);border-color:var(--muted)}
+  .secbtn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .secbtn .dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+  .secbtn .cnt{opacity:.7}
   details summary{cursor:pointer;color:var(--muted);font-size:13px;margin-bottom:8px}
   .small{font-size:11px;color:var(--muted)}
   /* modal */
@@ -399,6 +406,30 @@ function renderLegend(kind){
   }
 }
 
+// ---------- 섹터 분류 (종목명 키워드 기반, 근사치) ----------
+const SECTORS=[
+  {key:'IT',color:'#3b82f6'},{key:'금융',color:'#f59e0b'},{key:'헬스케어',color:'#ef4444'},
+  {key:'산업재',color:'#14b8a6'},{key:'필수소비재',color:'#22c55e'},{key:'자유소비재',color:'#eab308'},
+  {key:'에너지',color:'#a855f7'},{key:'소재',color:'#ec4899'},{key:'통신',color:'#92744e'},
+  {key:'부동산',color:'#c084fc'},{key:'채권/혼합',color:'#8b5cf6'},{key:'기타',color:'#94a3b8'},
+];
+function classifySector(nm){
+  const s=nm||''; const has=(...a)=>a.some(w=>s.includes(w));
+  if(has('채권','국고채','회사채','단기채','통안','크레딧','물가','TIPS','만기매칭','혼합','금리','CD금리','KOFR','MMF','종합채','달러채')) return '채권/혼합';
+  if(has('리츠','부동산','REIT','리얼티')) return '부동산';
+  if(has('반도체','2차전지','AI','인공지능','IT','테크','소프트','인터넷','게임','메타버스','클라우드','빅테크','로봇','HBM','데이터센터','전기차','반도')) return 'IT';
+  if(has('바이오','헬스','제약','의료','병원','신약')) return '헬스케어';
+  if(has('통신','5G')) return '통신';
+  if(has('에너지','원유','석유','가스','태양','친환경','신재생','원자력','수소','풍력')) return '에너지';
+  if(has('철강','화학','소재','구리','리튬','광물','니켈','희토류','금속')) return '소재';
+  if(has('조선','기계','항공','우주','방산','인프라','건설','운송','중공업','산업재','기계장비')) return '산업재';
+  if(has('필수소비','음식료','식품','농업')) return '필수소비재';
+  if(has('소비재','미디어','엔터','화장품','여행','레저','유통','자동차')) return '자유소비재';
+  if(has('은행','금융','증권','보험','배당','밸류업','지주')) return '금융';
+  return '기타';
+}
+function sectorColor(k){const f=SECTORS.find(s=>s.key===k);return f?f.color:'#94a3b8';}
+
 // ---------- squarified treemap ----------
 function squarify(items,X,Y,WID,HEI){
   const rects=[];
@@ -474,22 +505,52 @@ function renderTreemapList(list, v){
   el.appendChild(svg);
 }
 
+let _riserBase=[], _riserSector='all', _riserSortKey='rankChange', _riserAsc=false;
 function renderRisers(all){
-  const movers=all.filter(e=>e.isNew||e.rankChange>0)
-    .sort((a,b)=>{const av=a.isNew?9999:a.rankChange,bv=b.isNew?9999:b.rankChange;return bv-av;})
-    .slice(0,20);
-  let h='<table><thead><tr><th class="l">변동</th><th class="l">종목명</th><th>코드</th><th>현재</th><th>이전</th><th>모멘텀</th><th>등락률</th><th>거래대금(억)</th></tr></thead><tbody>';
-  for(const e of movers){
+  _riserBase = all.filter(e=>e.isNew||e.rankChange>0);  // 레버리지 제외는 momentumMap에서 이미 반영됨
+  // 선택된 섹터가 현재 결과에 없으면 전체로 복귀
+  if(_riserSector!=='all' && !_riserBase.some(e=>(e.sector||'기타')===_riserSector)) _riserSector='all';
+  drawRisers();
+}
+function drawRisers(){
+  const host=$('risers');
+  if(!_riserBase.length){host.innerHTML='<div class="small">순위 상승 종목이 없습니다.</div>';return;}
+  const counts={}; _riserBase.forEach(e=>{const s=e.sector||'기타';counts[s]=(counts[s]||0)+1;});
+  let bar='<div class="secbar">';
+  bar+=`<button class="secbtn ${_riserSector==='all'?'active':''}" data-sec="all">전체 보기 <span class="cnt">${_riserBase.length}</span></button>`;
+  for(const s of SECTORS){ if(!counts[s.key]) continue;
+    bar+=`<button class="secbtn ${_riserSector===s.key?'active':''}" data-sec="${s.key}"><span class="dot" style="background:${s.color}"></span>${s.key} <span class="cnt">${counts[s.key]}</span></button>`;
+  }
+  bar+='</div>';
+  let rows = _riserSector==='all' ? _riserBase.slice() : _riserBase.filter(e=>(e.sector||'기타')===_riserSector);
+  const gv={ rankChange:e=>e.isNew?1e9:(e.rankChange==null?-1e9:e.rankChange),
+             score:e=>(e.score==null?-1e9:e.score), fltRt:e=>(e.fltRt==null?-1e9:e.fltRt),
+             trPrc:e=>(e.trPrc==null?-1e9:e.trPrc) }[_riserSortKey] || (e=>0);
+  rows.sort((a,b)=> _riserAsc ? gv(a)-gv(b) : gv(b)-gv(a));
+  rows=rows.slice(0,40);
+  const ar=k=> _riserSortKey===k ? (_riserAsc?' ▲':' ▼') : '';
+  let h=bar+'<table><thead><tr><th class="l">변동</th><th class="l">종목명</th><th>섹터</th><th>현재</th>'+
+    `<th data-sk="score" style="cursor:pointer">모멘텀${ar('score')}</th>`+
+    `<th data-sk="fltRt" style="cursor:pointer">등락률${ar('fltRt')}</th>`+
+    `<th data-sk="trPrc" style="cursor:pointer">거래대금(억)${ar('trPrc')}</th></tr></thead><tbody>`;
+  for(const e of rows){
     h+=`<tr><td class="l"><span class="chip ${changeCls(e)}">${changeLabel(e)}</span></td>
-      <td class="l">${e.name}</td><td>${e.code}</td>
-      <td>${e.rankNow}</td><td>${e.isNew?'-':e.rankPrev}</td>
+      <td class="l">${e.name}</td>
+      <td><span class="dot" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${sectorColor(e.sector)};margin-right:5px"></span>${e.sector||'기타'}</td>
+      <td>${e.rankNow}</td>
       <td>${e.score.toFixed(0)}</td>
       <td class="${e.fltRt>0?'up':e.fltRt<0?'down':''}">${e.fltRt!=null?e.fltRt.toFixed(2)+'%':'-'}</td>
       <td>${e.trPrc!=null?(e.trPrc/1e8).toFixed(0):'-'}</td></tr>`;
   }
   h+='</tbody></table>';
-  if(!movers.length) h='<div class="small">순위 상승 종목이 없습니다.</div>';
-  $('risers').innerHTML=h;
+  if(!rows.length) h=bar+'<div class="small">이 섹터에 해당하는 종목이 없습니다.</div>';
+  host.innerHTML=h;
+  host.querySelectorAll('.secbtn').forEach(b=>b.onclick=()=>{_riserSector=b.dataset.sec;drawRisers();});
+  host.querySelectorAll('th[data-sk]').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.sk;
+    if(_riserSortKey===k)_riserAsc=!_riserAsc; else {_riserSortKey=k;_riserAsc=false;}
+    drawRisers();
+  });
 }
 
 let _fullData=[], _sortKey='rankNow', _sortAsc=true;
@@ -552,7 +613,7 @@ async function run(){
     nowList.forEach(e=>{const pr=prevRank[e.code];e.rankPrev=pr||null;e.isNew=!pr;e.rankChange=pr?(pr-e.rankNow):null;});
 
     const top=nowList.slice(0,topN);
-    nowList.forEach(e=>{e.trPrcEok=e.trPrc!=null?e.trPrc/1e8:null;e.r1m=e.rets.w1m;e.r3m=e.rets.w3m;e.r6m=e.rets.w6m;});
+    nowList.forEach(e=>{e.trPrcEok=e.trPrc!=null?e.trPrc/1e8:null;e.r1m=e.rets.w1m;e.r3m=e.rets.w3m;e.r6m=e.rets.w6m;e.sector=classifySector(e.name);});
     _allData=nowList; _topN=topN;
     renderHeatmap();
     renderRisers(nowList);
