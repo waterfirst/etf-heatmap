@@ -246,18 +246,44 @@
         <h2 style="margin:0">🧪 실험실</h2>
         <label class="small">그래프
           <select id="labtype" style="margin-left:6px">
-            <option value="scatter">산점도: 1개월수익률 × 모멘텀 (섹터색)</option>
-            <option value="bubble">버블: 3개월 × 6개월 수익률 (크기=거래대금)</option>
-            <option value="box">박스플롯: 섹터별 등락률 분포</option>
-            <option value="bar">막대: 섹터별 평균 모멘텀</option>
-            <option value="corr">상관 히트맵: 기간 수익률</option>
-            <option value="hist">히스토그램: 순위 변동 분포</option>
+            <optgroup label="섹터/수익률 분석">
+              <option value="sectorret">⭐ 섹터별 평균 수익률 (1·6·12개월)</option>
+              <option value="topetf">⭐ 상위 ETF 수익률 (1·6·12개월)</option>
+              <option value="sectorvol">섹터별 거래대금 비중</option>
+            </optgroup>
+            <optgroup label="탐색/통계">
+              <option value="scatter">산점도: 1개월수익률 × 모멘텀 (섹터색)</option>
+              <option value="bubble">버블: 3개월 × 6개월 수익률 (크기=거래대금)</option>
+              <option value="box">박스플롯: 섹터별 등락률 분포</option>
+              <option value="bar">막대: 섹터별 평균 모멘텀</option>
+              <option value="corr">상관 히트맵: 기간 수익률</option>
+              <option value="hist">히스토그램: 순위 변동 분포</option>
+            </optgroup>
+            <optgroup label="머신러닝">
+              <option value="cluster">K-means 클러스터링 (수익률 프로파일)</option>
+            </optgroup>
           </select>
         </label>
         <button class="btn sec" id="labrefresh" type="button">새로고침</button>
-        <span class="small">메인에서 데이터를 불러온 뒤 표시됩니다. 마음에 들면 메인으로 옮겨드릴게요.</span>
+        <span class="small">메인에서 데이터를 불러온 뒤 표시됩니다.</span>
       </div>
       <div id="labplot" style="min-height:560px"></div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <h2 style="margin:0">🧮 백테스트</h2>
+        <label class="small">보유 종목 <input id="bt_topn" type="number" value="5" style="width:58px"></label>
+        <label class="small">모멘텀
+          <select id="bt_lb"><option value="1">1개월</option><option value="3" selected>3개월</option><option value="6">6개월</option></select>
+        </label>
+        <label class="small">기간(개월) <input id="bt_months" type="number" value="12" style="width:58px"></label>
+        <label class="small">최소거래대금(억) <input id="bt_minval" type="number" value="10" style="width:58px"></label>
+        <button class="btn" id="bt_run" type="button">백테스트 실행 ▶</button>
+      </div>
+      <div class="small" style="margin-bottom:8px">월 1회 리밸런싱 · 매월 모멘텀 상위 N개 동일비중 보유 → 다음 달 수익. 벤치마크=전 종목 동일비중. (실행 시 월별 시세를 받아 처음엔 다소 걸립니다)</div>
+      <div id="bt_stats" class="summary" style="display:none"></div>
+      <div id="bt_plot" style="min-height:420px"></div>
     </div>
   </div>
 </div>
@@ -288,6 +314,7 @@ const $ = id => document.getElementById(id);
 function fmt(d){const y=d.getFullYear();const m=String(d.getMonth()+1).padStart(2,'0');const day=String(d.getDate()).padStart(2,'0');return `${y}${m}${day}`;}
 function parseYmd(s){return new Date(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8));}
 function addDays(d,n){const x=new Date(d);x.setDate(x.getDate()+n);return x;}
+function addMonths(d,n){const x=new Date(d);x.setMonth(x.getMonth()+n);return x;}
 function num(v){const n=parseFloat(String(v).replace(/,/g,''));return isNaN(n)?null:n;}
 function setStatus(msg,err){const s=$('status');s.textContent=msg;s.className='status'+(err?' err':'');}
 
@@ -658,6 +685,12 @@ async function run(){
 
     const top=nowList.slice(0,topN);
     nowList.forEach(e=>{e.trPrcEok=e.trPrc!=null?e.trPrc/1e8:null;e.r1m=e.rets.w1m;e.r3m=e.rets.w3m;e.r6m=e.rets.w6m;e.sector=classifySector(e.name);});
+    // 가중치와 무관한 절대 기준 수익률(실험실용): 1개월/6개월/1년
+    setStatus('수익률(1·6·12개월) 계산 중…');
+    const _bo=parseYmd(now.base.basDt);
+    const A1=await resolveDay(addDays(_bo,-30)), A6=await resolveDay(addDays(_bo,-182)), AY=await resolveDay(addDays(_bo,-365));
+    const RA=(anc,code,cur)=>{const p=anc&&anc.map[code];return (p&&p.clpr>0&&cur>0)?(cur/p.clpr-1)*100:null;};
+    nowList.forEach(e=>{e.ret1m=RA(A1,e.code,e.clpr);e.ret6m=RA(A6,e.code,e.clpr);e.ret1y=RA(AY,e.code,e.clpr);});
     _allData=nowList; _topN=topN;
     renderHeatmap();
     renderRisers(nowList);
@@ -1007,6 +1040,24 @@ function pearson(a,b){
   for(let i=0;i<n;i++){const x=a[i]-ma,y=b[i]-mb;num+=x*y;da+=x*x;db+=y*y;}
   return (da&&db)? num/Math.sqrt(da*db) : 0;
 }
+function zscore(rows){
+  const n=rows.length, dim=rows[0].length, mean=new Array(dim).fill(0), sd=new Array(dim).fill(0);
+  for(const r of rows)for(let j=0;j<dim;j++)mean[j]+=r[j]; for(let j=0;j<dim;j++)mean[j]/=n;
+  for(const r of rows)for(let j=0;j<dim;j++)sd[j]+=(r[j]-mean[j])**2; for(let j=0;j<dim;j++)sd[j]=Math.sqrt(sd[j]/n)||1;
+  return rows.map(r=>r.map((v,j)=>(v-mean[j])/sd[j]));
+}
+function kmeans(pts,k,iters){
+  const n=pts.length; if(n<k)k=Math.max(1,n); const dim=pts[0].length;
+  let cent=[]; for(let i=0;i<k;i++)cent.push(pts[Math.floor(i*n/k)].slice());
+  const asg=new Array(n).fill(0);
+  for(let it=0;it<iters;it++){
+    for(let i=0;i<n;i++){let best=0,bd=Infinity;for(let c=0;c<k;c++){let s=0;for(let j=0;j<dim;j++){const df=pts[i][j]-cent[c][j];s+=df*df;}if(s<bd){bd=s;best=c;}}asg[i]=best;}
+    const sum=Array.from({length:k},()=>new Array(dim).fill(0)),cnt=new Array(k).fill(0);
+    for(let i=0;i<n;i++){cnt[asg[i]]++;for(let j=0;j<dim;j++)sum[asg[i]][j]+=pts[i][j];}
+    for(let c=0;c<k;c++)if(cnt[c])for(let j=0;j<dim;j++)cent[c][j]=sum[c][j]/cnt[c];
+  }
+  return asg;
+}
 function labTheme(){
   const dark=!document.body.classList.contains('light');
   return {font:{color:dark?'#e2e8f0':'#0f172a'}, grid:dark?'rgba(148,163,184,.18)':'rgba(100,116,139,.25)'};
@@ -1065,6 +1116,36 @@ async function renderLab(){
     const vals=d.filter(e=>!e.isNew&&e.rankChange!=null).map(e=>e.rankChange);
     traces=[{type:'histogram',x:vals,marker:{color:'#3b82f6'},nbinsx:30,name:'순위변동'}];
     layout.title='순위 변동 분포 (양수=상승)'; layout.xaxis=ax('순위 변동 (이전−현재)'); layout.yaxis=ax('종목 수'); layout.showlegend=false;
+  } else if(t==='sectorret'){
+    const m=bySec(); const av=(arr,f)=>{const v=arr.map(f).filter(x=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:0;};
+    const rows=Object.keys(m).map(s=>({s,m1:av(m[s],e=>e.ret1m),m6:av(m[s],e=>e.ret6m),y1:av(m[s],e=>e.ret1y)})).sort((a,b)=>b.y1-a.y1);
+    traces=[
+      {type:'bar',name:'1개월',x:rows.map(r=>r.s),y:rows.map(r=>+r.m1.toFixed(1)),marker:{color:'#3b82f6'}},
+      {type:'bar',name:'6개월',x:rows.map(r=>r.s),y:rows.map(r=>+r.m6.toFixed(1)),marker:{color:'#a855f7'}},
+      {type:'bar',name:'1년',x:rows.map(r=>r.s),y:rows.map(r=>+r.y1.toFixed(1)),marker:{color:'#ef4444'}},
+    ];
+    layout.barmode='group'; layout.title='섹터별 평균 수익률 (1·6·12개월)'; layout.xaxis=ax('섹터'); layout.yaxis=ax('평균 수익률 %');
+  } else if(t==='topetf'){
+    const arr=d.filter(e=>e.ret1y!=null).sort((a,b)=>b.ret1y-a.ret1y).slice(0,15);
+    traces=[
+      {type:'bar',name:'1개월',x:arr.map(e=>e.name),y:arr.map(e=>+((e.ret1m==null?0:e.ret1m)).toFixed(1)),marker:{color:'#3b82f6'}},
+      {type:'bar',name:'6개월',x:arr.map(e=>e.name),y:arr.map(e=>+((e.ret6m==null?0:e.ret6m)).toFixed(1)),marker:{color:'#a855f7'}},
+      {type:'bar',name:'1년',x:arr.map(e=>e.name),y:arr.map(e=>+e.ret1y.toFixed(1)),marker:{color:'#ef4444'}},
+    ];
+    layout.barmode='group'; layout.title='상위 ETF 수익률 (1년 기준 상위 15)'; layout.xaxis={...ax('종목'),tickangle:-40}; layout.yaxis=ax('수익률 %'); layout.margin.b=150;
+  } else if(t==='sectorvol'){
+    const m=bySec(); const rows=Object.keys(m).map(s=>[s,m[s].reduce((a,e)=>a+(e.trPrc||0),0)/1e8]).sort((a,b)=>b[1]-a[1]);
+    traces=[{type:'bar',x:rows.map(r=>r[0]),y:rows.map(r=>Math.round(r[1])),marker:{color:rows.map(r=>sectorColor(r[0]))},text:rows.map(r=>Math.round(r[1])+'억'),textposition:'outside'}];
+    layout.title='섹터별 거래대금 합 (억원)'; layout.xaxis=ax('섹터'); layout.yaxis=ax('거래대금(억)'); layout.showlegend=false;
+  } else if(t==='cluster'){
+    const rows=d.filter(e=>e.ret1m!=null&&e.ret6m!=null&&e.ret1y!=null);
+    if(rows.length<6){ host.innerHTML='<div class="small" style="padding:24px">클러스터링에 필요한 데이터(1·6·12개월 수익률)가 부족합니다.</div>'; return; }
+    const Z=zscore(rows.map(e=>[e.ret1m,e.ret6m,e.ret1y])); const asg=kmeans(Z,4,25);
+    const g={}; rows.forEach((e,i)=>{(g[asg[i]]=g[asg[i]]||[]).push(e);});
+    traces=Object.keys(g).map(c=>({type:'scatter',mode:'markers',name:'그룹 '+(+c+1),
+      x:g[c].map(e=>e.ret1m), y:g[c].map(e=>e.ret1y), text:g[c].map(e=>e.name+' ('+e.sector+')'),
+      marker:{size:10}, hovertemplate:'%{text}<br>1개월 %{x:.1f}%<br>1년 %{y:.1f}%<extra>그룹 '+(+c+1)+'</extra>'}));
+    layout.title='K-means 클러스터링 — 수익률 프로파일 (k=4)'; layout.xaxis=ax('1개월 수익률 %'); layout.yaxis=ax('1년 수익률 %');
   }
   host.innerHTML='';
   P.newPlot(host,traces,layout,{responsive:true,displaylogo:false,modeBarButtonsToRemove:['lasso2d','select2d']});
@@ -1081,6 +1162,62 @@ $('tab-main-btn').onclick=()=>showTab('main');
 $('tab-lab-btn').onclick=()=>showTab('lab');
 $('labtype').onchange=renderLab;
 $('labrefresh').onclick=renderLab;
+
+// ===== 백테스트 (월 1회 리밸런싱 모멘텀 전략) =====
+async function runBacktest(){
+  const host=$('bt_plot'), statsEl=$('bt_stats');
+  if(!$('apikey').value){setStatus('먼저 비밀번호로 잠금 해제하세요.',true);return;}
+  const topN=Math.max(1,num($('bt_topn').value)||5);
+  const lb=Math.max(1,num($('bt_lb').value)||3);
+  const months=Math.max(3,Math.min(36,num($('bt_months').value)||12));
+  const minVal=(num($('bt_minval').value)||0)*1e8;
+  statsEl.style.display='none';
+  host.innerHTML='<div class="small" style="padding:20px">월별 시세 불러오는 중… (처음엔 다소 걸립니다)</div>';
+  let P; try{await ensurePlotly();P=window.Plotly;}catch(e){host.innerHTML='<div class="small" style="padding:20px;color:#fca5a5">Plotly 로드 실패</div>';return;}
+  try{
+    const base=new Date($('basedate').value+'T00:00:00');
+    const total=months+lb; const snaps=[];
+    for(let i=total;i>=0;i--){ setStatus('백테스트 데이터 '+(total-i+1)+'/'+(total+1)+' …'); snaps.push(await resolveDay(addMonths(base,-i))); }
+    const price=(idx,code)=>{const s=snaps[idx];if(!s)return null;const r=s.map[code];return(r&&r.clpr>0)?r.clpr:null;};
+    const liq=(idx,code)=>{const s=snaps[idx];if(!s)return 0;const r=s.map[code];return r?(r.trPrc||0):0;};
+    let eq=1,bench=1; const eqArr=[1],benchArr=[1],labels=[(snaps[lb]&&snaps[lb].basDt)||''];
+    let wins=0,periods=0;
+    for(let t=lb;t<=total-1;t++){
+      if(!snaps[t]||!snaps[t-lb]||!snaps[t+1]) continue;
+      const cands=[];
+      for(const code in snaps[t].map){
+        const pc=price(t,code),pp=price(t-lb,code);
+        if(pc==null||pp==null)continue; if(liq(t,code)<minVal)continue;
+        cands.push({code,mom:pc/pp-1});
+      }
+      if(!cands.length) continue;
+      cands.sort((a,b)=>b.mom-a.mom);
+      const pick=cands.slice(0,topN);
+      let r=0,c=0; for(const p of pick){const pc=price(t,p.code),pn=price(t+1,p.code);if(pc!=null&&pn!=null){r+=pn/pc-1;c++;}}
+      const sret=c?r/c:0;
+      let br=0,bc=0; for(const cd of cands){const pc=price(t,cd.code),pn=price(t+1,cd.code);if(pc!=null&&pn!=null){br+=pn/pc-1;bc++;}}
+      const bret=bc?br/bc:0;
+      eq*=(1+sret); bench*=(1+bret);
+      eqArr.push(+eq.toFixed(4)); benchArr.push(+bench.toFixed(4)); labels.push(snaps[t+1].basDt);
+      if(sret>bret)wins++; periods++;
+    }
+    if(periods<1){ host.innerHTML='<div class="small" style="padding:20px;color:#fca5a5">충분한 월별 데이터를 확보하지 못했습니다. 기간을 줄여보세요.</div>'; return; }
+    const totRet=(eq-1)*100, benchTot=(bench-1)*100;
+    const yrs=periods/12; const cagr=yrs>0?(Math.pow(eq,1/yrs)-1)*100:0;
+    let peak=-Infinity,mdd=0; for(const v of eqArr){if(v>peak)peak=v;const dd=v/peak-1;if(dd<mdd)mdd=dd;}
+    const winrate=periods?wins/periods*100:0;
+    statsEl.style.display='block';
+    statsEl.innerHTML='<b>백테스트 결과</b> ('+periods+'개월 리밸런싱, 상위 '+topN+'개, '+lb+'개월 모멘텀)<br>'+
+      '전략 총수익 <b>'+totRet.toFixed(1)+'%</b> · CAGR '+cagr.toFixed(1)+'% · 벤치마크 '+benchTot.toFixed(1)+'% · 최대낙폭(MDD) '+(mdd*100).toFixed(1)+'% · 월 승률 '+winrate.toFixed(0)+'%';
+    const th=labTheme();
+    P.newPlot(host,[
+      {type:'scatter',mode:'lines',name:'모멘텀 전략',x:labels,y:eqArr,line:{color:'#ef4444',width:2}},
+      {type:'scatter',mode:'lines',name:'벤치마크(동일비중)',x:labels,y:benchArr,line:{color:'#94a3b8',width:2}},
+    ],{paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',font:th.font,height:420,margin:{t:30,r:20,b:50,l:60},legend:{font:th.font},title:'누적 성장 (1=원금)',xaxis:{gridcolor:th.grid},yaxis:{title:'성장배수',gridcolor:th.grid}},{responsive:true,displaylogo:false});
+    setStatus('백테스트 완료.');
+  }catch(e){ console.error(e); host.innerHTML='<div class="small" style="padding:20px;color:#fca5a5">백테스트 오류: '+e.message+'</div>'; }
+}
+$('bt_run').onclick=runBacktest;
 
 // ===== 테마(다크/라이트) =====
 function applyTheme(t){
