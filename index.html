@@ -620,7 +620,7 @@ function drawRisers(){
              score:e=>(e.score==null?-1e9:e.score), fltRt:e=>(e.fltRt==null?-1e9:e.fltRt),
              trPrc:e=>(e.trPrc==null?-1e9:e.trPrc) }[_riserSortKey] || (e=>0);
   rows.sort((a,b)=> _riserAsc ? gv(a)-gv(b) : gv(b)-gv(a));
-  rows=rows.slice(0,40);
+  rows=rows.slice(0,15);
   const ar=k=> _riserSortKey===k ? (_riserAsc?' ▲':' ▼') : '';
   let h=bar+'<table><thead><tr><th class="l">변동</th><th class="l">종목명</th><th>섹터</th><th>현재</th>'+
     `<th data-sk="score" style="cursor:pointer">모멘텀${ar('score')}</th>`+
