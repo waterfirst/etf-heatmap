@@ -738,7 +738,10 @@ async function run(){
     _fullData=top; _sortKey='rankNow'; _sortAsc=true; _fullSector='all'; renderFullSectorBar(); renderFull();
     if($('tab-lab') && $('tab-lab').style.display!=='none') renderLab();
 
-    setStatus(`완료 · 확정일 ${now.base.basDt} · 대상 ${nowList.length}종목 중 상위 ${top.length} 표시 · 비교기준 ${prev.base?prev.base.basDt:'N/A'}`);
+    // 기준일 UI를 실제 거래일로 갱신
+    const actualDt=now.base.basDt;
+    $('basedate').value=actualDt.slice(0,4)+'-'+actualDt.slice(4,6)+'-'+actualDt.slice(6,8);
+    setStatus(`완료 · 확정일 ${actualDt} · 대상 ${nowList.length}종목 중 상위 ${top.length} 표시 · 비교기준 ${prev.base?prev.base.basDt:'N/A'}`);
   }catch(err){
     console.error(err);
     const fetchFail=/Failed to fetch|NetworkError|load failed/i.test(err.message);
@@ -1080,7 +1083,7 @@ function activeBlob(){ return localStorage.getItem('etf_enc') || ENC_KEY; }
 async function doUnlock(){
   const pin=$('pin').value.trim();
   if(!pin){setStatus('비밀번호를 입력하세요.',true);return;}
-  if(!activeBlob()){setStatus('암호화된 키가 없습니다. [키 직접 입력]에서 키를 넣고 암호문을 생성해 코드의 ENC_KEY에 넣으세요.',true);return;}
+  if(!activeBlob()){setStatus('암호화된 키가 없습니다. 관리자에게 문의하세요.',true);return;}
   if(!(window.crypto&&crypto.subtle)){setStatus('이 브라우저/환경에서 복호화를 쓸 수 없습니다(https 또는 localhost 필요).',true);return;}
   setStatus('잠금 해제 중…');
   try{
@@ -1092,14 +1095,15 @@ async function doUnlock(){
 }
 $('unlockbtn').onclick=doUnlock;
 $('pin').addEventListener('keydown',ev=>{ if(ev.key==='Enter'){ev.preventDefault();doUnlock();} });
-$('advtoggle').onclick=()=>{ const b=$('advbox'); b.style.display=(b.style.display==='none'?'block':'none'); };
-$('keytoggle').onclick=()=>{const i=$('apikey');const b=$('keytoggle');
+// advtoggle, keytoggle 제거됨 (키 직접 입력 UI 삭제)
+if($('advtoggle')) $('advtoggle').onclick=()=>{ const b=$('advbox'); if(b) b.style.display=(b.style.display==='none'?'block':'none'); };
+if($('keytoggle')) $('keytoggle').onclick=()=>{const i=$('apikey');if(!i)return;const b=$('keytoggle');
   if(i.type==='password'){i.type='text';b.textContent='숨김';}else{i.type='password';b.textContent='보기';}};
-$('genbtn').onclick=async()=>{
+if($('genbtn')) $('genbtn').onclick=async()=>{
   const k=$('apikey').value.trim(); const pin=($('pin').value.trim()||'7688');
-  if(!k){setStatus('먼저 [키 직접 입력]에 서비스키를 넣으세요.',true);return;}
+  if(!k){setStatus('먼저 서비스키를 넣으세요.',true);return;}
   try{ const blob=await encryptKey(k,pin);
-    $('genout').textContent='↓ index.html 의 ENC_KEY 값을 아래로 교체하고 push 하세요 (비밀번호: '+pin+')\n'+blob;
+    if($('genout')) $('genout').textContent='ENC_KEY 교체용: '+blob;
   }catch(e){ setStatus('암호문 생성 실패: '+e.message,true); }
 };
 // ===== 관리자: 접속 비밀번호 변경 =====
@@ -1130,7 +1134,15 @@ function ensurePlotly(){
   _plotlyLoading=new Promise((res,rej)=>{
     const s=document.createElement('script');
     s.src='https://cdn.plot.ly/plotly-2.35.2.min.js';
-    s.onload=()=>res(); s.onerror=()=>rej(new Error('Plotly 로드 실패(CDN 차단 가능)'));
+    s.onload=()=>res();
+    s.onerror=()=>{
+      // fallback CDN
+      const s2=document.createElement('script');
+      s2.src='https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js';
+      s2.onload=()=>res();
+      s2.onerror=()=>rej(new Error('Plotly 로드 실패(CDN 차단 가능). 인터넷 연결 확인.'));
+      document.head.appendChild(s2);
+    };
     document.head.appendChild(s);
   });
   return _plotlyLoading;
