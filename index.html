@@ -201,6 +201,13 @@
       <div class="fld">
         <button class="btn sec" id="clearbtn">캐시 비우기</button>
       </div>
+      <div class="fld">
+        <button class="btn sec" id="cacheexport" type="button">캐시 저장(JSON)</button>
+      </div>
+      <div class="fld">
+        <button class="btn sec" id="cacheimportbtn" type="button">캐시 불러오기</button>
+        <input id="cacheimport" type="file" accept="application/json,.json" style="display:none">
+      </div>
     </div>
     <div class="status" id="status"></div>
   </div>
@@ -277,7 +284,7 @@
         <label class="small">모멘텀
           <select id="bt_lb"><option value="1">1개월</option><option value="3" selected>3개월</option><option value="6">6개월</option></select>
         </label>
-        <label class="small">기간(개월) <input id="bt_months" type="number" value="12" style="width:58px"></label>
+        <label class="small">기간(개월) <input id="bt_months" type="number" value="6" style="width:58px"></label>
         <label class="small">최소거래대금(억) <input id="bt_minval" type="number" value="10" style="width:58px"></label>
         <button class="btn" id="bt_run" type="button">백테스트 실행 ▶</button>
       </div>
@@ -449,31 +456,36 @@ function colorForReturn(rt){
 function pct(v,d){return v!=null?((v>=0?'+':'')+v.toFixed(d==null?2:d)+'%'):'-';}
 
 // ---------- 히트맵 보기 기준 정의 ----------
+// 발산형 색(파랑=하락 ↔ 회색 ↔ 빨강=상승). cap은 "현재 보이는 종목들" 기준 상대 스케일.
+function divColor(v, cap){
+  if(v==null) return '#475569';
+  const t=Math.max(-1,Math.min(1, cap>0? v/cap : 0));
+  if(t>=0){const r=Math.round(75+149*t),g=Math.round(85-28*t),b=Math.round(99-52*t);return `rgb(${r},${g},${b})`;}
+  const a=-t,r=Math.round(75-28*a),g=Math.round(85+31*a),b=Math.round(99+125*a);return `rgb(${r},${g},${b})`;
+}
 const VIEWS={
   momentum:{ title:'모멘텀 점수 상위', sortKey:e=>e.score,
-    value:e=>Math.max(e.score,1), color:e=>colorForChange(e.rankChange,e.isNew),
-    line2:e=>`#${e.rankNow}  ${changeLabel(e)}`, line3:e=>`점수 ${e.score.toFixed(0)}`,
-    legend:'color', sizeNote:'크기=모멘텀 점수' },
+    value:e=>Math.max(e.score,1), colorMetric:e=>e.isNew?null:e.rankChange, colorKind:'change',
+    line2:e=>`#${e.rankNow}  ${changeLabel(e)}`, line3:e=>`점수 ${e.score.toFixed(0)}`, legend:'change' },
   ret:{ title:'등락률(상승률) 상위', sortKey:e=>(e.fltRt==null?-1e9:e.fltRt),
-    value:e=>Math.max((e.trPrc||0)/1e8,0.1), color:e=>colorForReturn(e.fltRt),
-    line2:e=>pct(e.fltRt), line3:e=>`#${e.rankNow}`,
-    legend:'ret', sizeNote:'크기=거래대금' },
+    value:e=>Math.max((e.trPrc||0)/1e8,0.1), colorMetric:e=>e.fltRt, colorKind:'ret',
+    line2:e=>pct(e.fltRt), line3:e=>`#${e.rankNow}`, legend:'ret' },
   vol:{ title:'거래대금 상위', sortKey:e=>(e.trPrc||0),
-    value:e=>Math.max((e.trPrc||0)/1e8,0.1), color:e=>colorForReturn(e.fltRt),
-    line2:e=>`${e.trPrc!=null?(e.trPrc/1e8).toFixed(0)+'억':'-'}`, line3:e=>pct(e.fltRt,1),
-    legend:'ret', sizeNote:'크기=거래대금' },
+    value:e=>Math.max((e.trPrc||0)/1e8,0.1), colorMetric:e=>e.fltRt, colorKind:'ret',
+    line2:e=>`${e.trPrc!=null?(e.trPrc/1e8).toFixed(0)+'억':'-'}`, line3:e=>pct(e.fltRt,1), legend:'ret' },
   riser:{ title:'순위 급상승', sortKey:e=>(e.isNew?9999:(e.rankChange==null?-1e9:e.rankChange)),
-    value:e=>Math.max(e.isNew?15:(e.rankChange||0),1), color:e=>colorForChange(e.rankChange,e.isNew),
-    line2:e=>changeLabel(e), line3:e=>`#${e.rankNow}`,
-    legend:'color', sizeNote:'크기=순위 상승폭' },
+    value:e=>Math.max(e.isNew?15:(e.rankChange||0),1), colorMetric:e=>e.isNew?null:e.rankChange, colorKind:'change',
+    line2:e=>changeLabel(e), line3:e=>`#${e.rankNow}`, legend:'change' },
 };
-function renderLegend(kind){
+function renderLegend(kind, cap){
   const el=$('hmlegend');
   if(kind==='ret'){
-    el.innerHTML='<span>하락</span><span class="bar"></span><span>상승</span>';
+    const c=cap!=null?` <span class="small">(상대 스케일 ±${(+cap).toFixed(1)}%)</span>`:'';
+    el.innerHTML='<span>하락</span><span class="bar"></span><span>상승</span>'+c;
   } else {
+    const c=cap!=null?` <span class="small">(상대 스케일 ±${Math.round(+cap)}위)</span>`:'';
     el.innerHTML='<span>순위 하락</span><span class="bar"></span><span>순위 상승</span>'+
-      '<span style="margin-left:12px"><span class="chip new">NEW</span> 신규 진입</span>';
+      '<span style="margin-left:10px"><span class="chip new">NEW</span></span>'+c;
   }
 }
 
@@ -530,10 +542,17 @@ let _allData=[], _topN=50, _view='momentum';
 function renderHeatmap(){
   const v=VIEWS[_view]||VIEWS.momentum;
   const list=_allData.slice().sort((a,b)=>v.sortKey(b)-v.sortKey(a)).slice(0,_topN);
-  renderLegend(v.legend);
-  renderTreemapList(list, v);
+  // 보이는 종목들의 색 지표로 상대 스케일(cap) 계산 — 90퍼센타일 절대값으로 이상치 완화
+  const vals=list.map(e=>v.colorMetric(e)).filter(x=>x!=null);
+  const abs=vals.map(Math.abs).sort((a,b)=>a-b);
+  let cap = abs.length ? abs[Math.floor((abs.length-1)*0.9)] : 1;
+  if(!cap || !isFinite(cap)) cap = abs.length ? abs[abs.length-1] : 1;
+  if(!cap || !isFinite(cap)) cap = 1;
+  const colorFn = e => (v.colorKind==='change' && e.isNew) ? '#a855f7' : divColor(v.colorMetric(e), cap);
+  renderLegend(v.legend, cap);
+  renderTreemapList(list, v, colorFn);
 }
-function renderTreemapList(list, v){
+function renderTreemapList(list, v, colorFn){
   const el=$('treemap');el.innerHTML='';
   const W=el.clientWidth, H=el.clientHeight;
   if(!list.length){el.innerHTML='<div class="small" style="padding:20px">표시할 데이터가 없습니다.</div>';return;}
@@ -550,7 +569,7 @@ function renderTreemapList(list, v){
     const r=document.createElementNS(NS,'rect');
     r.setAttribute('x',rc.x);r.setAttribute('y',rc.y);
     r.setAttribute('width',Math.max(0,rc.w));r.setAttribute('height',Math.max(0,rc.h));
-    r.setAttribute('fill',v.color(e));
+    r.setAttribute('fill',colorFn(e));
     const tip=`${e.name} (${e.code})\n현재순위 ${e.rankNow}위 / ${e.isNew?'신규진입':('이전 '+e.rankPrev+'위, '+changeLabel(e))}\n모멘텀 ${e.score.toFixed(0)} · 등락률 ${e.fltRt!=null?e.fltRt.toFixed(2)+'%':'-'}\n거래대금 ${e.trPrc!=null?(e.trPrc/1e8).toFixed(0)+'억':'-'}`;
     const title=document.createElementNS(NS,'title');title.textContent=tip;
     g.appendChild(r);g.appendChild(title);
@@ -685,8 +704,8 @@ async function run(){
 
     const top=nowList.slice(0,topN);
     nowList.forEach(e=>{e.trPrcEok=e.trPrc!=null?e.trPrc/1e8:null;e.r1m=e.rets.w1m;e.r3m=e.rets.w3m;e.r6m=e.rets.w6m;e.sector=classifySector(e.name);});
-    // 가중치와 무관한 절대 기준 수익률(실험실용): 1개월/6개월/1년
-    setStatus('수익률(1·6·12개월) 계산 중…');
+    // 단순 기간 수익률(실험실용): (현재가 ÷ N개월 전 가격 − 1). 모멘텀 가중치와 무관.
+    setStatus('기간 수익률(1·6·12개월) 계산 중…');
     const _bo=parseYmd(now.base.basDt);
     const A1=await resolveDay(addDays(_bo,-30)), A6=await resolveDay(addDays(_bo,-182)), AY=await resolveDay(addDays(_bo,-365));
     const RA=(anc,code,cur)=>{const p=anc&&anc.map[code];return (p&&p.clpr>0&&cur>0)?(cur/p.clpr-1)*100:null;};
@@ -727,6 +746,31 @@ $('clearbtn').onclick=()=>{
   Object.keys(localStorage).filter(k=>k.startsWith('etfsnap_')).forEach(k=>localStorage.removeItem(k));
   for(const k in memCache) delete memCache[k];
   setStatus('가격 캐시를 비웠습니다. 다음 계산 시 새로 받아옵니다.');
+};
+// ===== 캐시 JSON 저장/불러오기 (월별 스냅샷을 파일로 보관 → 백테스트·재실행 가속) =====
+$('cacheexport').onclick=()=>{
+  const snaps={}; let n=0;
+  Object.keys(localStorage).filter(k=>k.startsWith('etfsnap_')).forEach(k=>{try{snaps[k]=JSON.parse(localStorage.getItem(k));n++;}catch(e){}});
+  if(!n){setStatus('저장할 캐시가 없습니다. 먼저 데이터를 불러오거나 백테스트를 실행하세요.',true);return;}
+  const blob=new Blob([JSON.stringify({v:1,saved:new Date().toISOString(),count:n,snaps})],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='etf_cache_'+fmt(new Date())+'.json';a.click();
+  setStatus(n+'개 일자 스냅샷을 JSON 파일로 저장했습니다.');
+};
+$('cacheimportbtn').onclick=()=>$('cacheimport').click();
+$('cacheimport').onchange=ev=>{
+  const f=ev.target.files&&ev.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{
+    try{
+      const j=JSON.parse(rd.result); const snaps=j.snaps||j; let n=0, fail=0;
+      Object.keys(snaps).forEach(k=>{ if(!k.startsWith('etfsnap_'))return;
+        try{ localStorage.setItem(k, JSON.stringify(snaps[k])); memCache[k.slice(8)]=snaps[k]; n++; }
+        catch(e){ fail++; }
+      });
+      setStatus(n+'개 일자 스냅샷을 불러왔습니다'+(fail?(' (저장공간 초과로 '+fail+'개 실패)'):'')+'. 계산·백테스트가 빨라집니다.');
+    }catch(e){ setStatus('캐시 파일을 읽지 못했습니다: '+e.message,true); }
+  };
+  rd.readAsText(f);
 };
 window.addEventListener('resize',()=>{if(_allData.length)renderHeatmap();});
 // ================= 상세 차트 =================
