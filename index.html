@@ -208,6 +208,9 @@
         <button class="btn sec" id="cacheimportbtn" type="button">캐시 불러오기</button>
         <input id="cacheimport" type="file" accept="application/json,.json" style="display:none">
       </div>
+      <div class="fld">
+        <button class="btn sec" id="buildyear" type="button">1년 캐시 만들기</button>
+      </div>
     </div>
     <div class="status" id="status"></div>
   </div>
@@ -747,14 +750,25 @@ $('clearbtn').onclick=()=>{
   for(const k in memCache) delete memCache[k];
   setStatus('가격 캐시를 비웠습니다. 다음 계산 시 새로 받아옵니다.');
 };
-// ===== 캐시 JSON 저장/불러오기 (월별 스냅샷을 파일로 보관 → 백테스트·재실행 가속) =====
-$('cacheexport').onclick=()=>{
-  const snaps={}; let n=0;
-  Object.keys(localStorage).filter(k=>k.startsWith('etfsnap_')).forEach(k=>{try{snaps[k]=JSON.parse(localStorage.getItem(k));n++;}catch(e){}});
-  if(!n){setStatus('저장할 캐시가 없습니다. 먼저 데이터를 불러오거나 백테스트를 실행하세요.',true);return;}
+// ===== 캐시 JSON 저장/불러오기 (스냅샷을 파일로 보관 → 백테스트·재실행 가속) =====
+// 일별 스냅샷 보관용: 필요한 필드만 추려 용량 절감
+function trimItem(it){return {srtnCd:it.srtnCd, isinCd:it.isinCd, itmsNm:it.itmsNm, clpr:it.clpr, fltRt:it.fltRt, trqu:it.trqu, trPrc:it.trPrc, mrktTotAmt:it.mrktTotAmt, nav:it.nav};}
+function collectCache(){
+  const snaps={};
+  Object.keys(localStorage).filter(k=>k.startsWith('etfsnap_')).forEach(k=>{try{snaps[k]=JSON.parse(localStorage.getItem(k));}catch(e){}});
+  Object.keys(memCache).forEach(bd=>{ if(/^\d{8}$/.test(bd) && Array.isArray(memCache[bd]) && memCache[bd].length) snaps['etfsnap_'+bd]=memCache[bd]; });
+  return snaps;
+}
+function downloadCache(snaps, tag){
+  const n=Object.keys(snaps).length;
+  if(!n){setStatus('저장할 캐시가 없습니다. 먼저 데이터를 불러오거나 [1년 캐시 만들기]를 실행하세요.',true);return 0;}
   const blob=new Blob([JSON.stringify({v:1,saved:new Date().toISOString(),count:n,snaps})],{type:'application/json'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='etf_cache_'+fmt(new Date())+'.json';a.click();
-  setStatus(n+'개 일자 스냅샷을 JSON 파일로 저장했습니다.');
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='etf_cache_'+(tag||'')+fmt(new Date())+'.json';a.click();
+  return n;
+}
+$('cacheexport').onclick=()=>{
+  const n=downloadCache(collectCache(),'');
+  if(n) setStatus(n+'개 일자 스냅샷을 JSON 파일로 저장했습니다.');
 };
 $('cacheimportbtn').onclick=()=>$('cacheimport').click();
 $('cacheimport').onchange=ev=>{
@@ -762,16 +776,41 @@ $('cacheimport').onchange=ev=>{
   const rd=new FileReader();
   rd.onload=()=>{
     try{
-      const j=JSON.parse(rd.result); const snaps=j.snaps||j; let n=0, fail=0;
+      const j=JSON.parse(rd.result); const snaps=j.snaps||j; let n=0, lsfail=0;
       Object.keys(snaps).forEach(k=>{ if(!k.startsWith('etfsnap_'))return;
-        try{ localStorage.setItem(k, JSON.stringify(snaps[k])); memCache[k.slice(8)]=snaps[k]; n++; }
-        catch(e){ fail++; }
+        memCache[k.slice(8)]=snaps[k]; n++;                       // 메모리에는 항상 적재
+        try{ localStorage.setItem(k, JSON.stringify(snaps[k])); } // localStorage는 best-effort
+        catch(e){ lsfail++; }
       });
-      setStatus(n+'개 일자 스냅샷을 불러왔습니다'+(fail?(' (저장공간 초과로 '+fail+'개 실패)'):'')+'. 계산·백테스트가 빨라집니다.');
+      setStatus(n+'개 일자 스냅샷을 불러왔습니다'+(lsfail?(' (대용량이라 '+lsfail+'개는 이번 세션 메모리에만 보관)'):'')+'. 계산·백테스트가 빨라집니다.');
     }catch(e){ setStatus('캐시 파일을 읽지 못했습니다: '+e.message,true); }
   };
   rd.readAsText(f);
 };
+// ===== 1년(365일) 캐시 만들기: 거래일 전종목 스냅샷을 받아 메모리+JSON으로 보관 =====
+let _buildingCache=false;
+async function buildYearCache(){
+  if(_buildingCache) return;
+  if(!$('apikey').value){setStatus('먼저 비밀번호로 잠금 해제하세요.',true);return;}
+  _buildingCache=true; $('buildyear').disabled=true;
+  try{
+    const base=new Date($('basedate').value+'T00:00:00'); let got=0;
+    for(let i=0;i<365;i++){
+      const dd=addDays(base,-i); const wd=dd.getDay(); if(wd===0||wd===6) continue;  // 주말 스킵
+      const k=fmt(dd);
+      if(!memCache[k]){
+        if((i%4)===0) setStatus('1년 캐시 수집 중… '+i+'/365일 (거래일 확보 '+got+')');
+        let arr; try{ arr=await fetchRaw(k); }catch(e){ arr=[]; }
+        memCache[k]=arr.map(trimItem);   // 메모리에만(localStorage 한도 회피)
+      }
+      if(memCache[k] && memCache[k].length) got++;
+    }
+    const snaps=collectCache(); const n=downloadCache(snaps,'1y_');
+    if(n) setStatus('1년 캐시 완료: 거래일 '+got+'개 확보 → JSON '+n+'개 일자 저장. 다음부터 [캐시 불러오기]로 즉시 사용하세요.');
+  }catch(e){ setStatus('1년 캐시 생성 오류: '+e.message,true); }
+  finally{ _buildingCache=false; $('buildyear').disabled=false; }
+}
+$('buildyear').onclick=buildYearCache;
 window.addEventListener('resize',()=>{if(_allData.length)renderHeatmap();});
 // ================= 상세 차트 =================
 function ema(arr,n){const k=2/(n+1);const out=new Array(arr.length).fill(null);let prev=null;
