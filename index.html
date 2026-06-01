@@ -10,9 +10,14 @@
     --text:#e2e8f0; --muted:#94a3b8; --accent:#3b82f6; --accent2:#2563eb;
     --up:#ef4444; --down:#3b82f6; --new:#a855f7;
   }
+  body.light{
+    --bg:#f6f8fc; --panel:#ffffff; --panel2:#eef2f7; --line:#dbe2ea;
+    --text:#0f172a; --muted:#64748b;
+  }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);
+  body{margin:0;background:var(--bg);color:var(--text);transition:background .2s,color .2s;
     font-family:"Segoe UI","Malgun Gothic","Apple SD Gothic Neo",sans-serif;font-size:14px}
+  select{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:6px;padding:5px 8px;font-size:13px}
   header{padding:14px 20px;border-bottom:1px solid var(--line);
     display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
   header h1{font-size:20px;margin:0;font-weight:700}
@@ -56,8 +61,8 @@
   .panel h2{margin:0 0 10px;font-size:15px}
   #treemap{width:100%;height:560px;background:var(--panel2);border-radius:10px;overflow:hidden}
   .cell text{pointer-events:none;font-family:inherit}
-  .cell rect{stroke:#0b1220;stroke-width:1.5;cursor:pointer}
-  .cell:hover rect{stroke:#e2e8f0;stroke-width:1.5}
+  .cell rect{stroke:var(--bg);stroke-width:1.5;cursor:pointer}
+  .cell:hover rect{stroke:#e2e8f0;stroke-width:2}
   table{width:100%;border-collapse:collapse;font-size:12.5px}
   th,td{padding:7px 9px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
   th{color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;cursor:pointer;user-select:none}
@@ -93,7 +98,8 @@
 <body>
 <header>
   <h1>📈 ETF 모멘텀 히트맵</h1>
-  <span class="sub">크기 = 모멘텀 점수 · 색상 = 순위 상승폭 (빨강 ▲ / 파랑 ▼) · 공공데이터포털 ETF시세(확정 일봉, 한국거래소 데이터)</span>
+  <span class="sub">공공데이터포털 ETF시세(확정 일봉, 한국거래소 데이터)</span>
+  <button class="btn sec" id="themebtn" type="button" style="margin-left:auto">🌙 다크</button>
 </header>
 
 <div class="ticker" id="ticker"><span class="small">시세 불러오는 중…</span></div>
@@ -149,10 +155,17 @@
   </div>
 
   <div class="panel">
-    <h2>히트맵 — 상위 모멘텀 ETF</h2>
-    <div class="legend">
-      <span>순위 하락</span><span class="bar"></span><span>순위 상승</span>
-      <span style="margin-left:12px"><span class="chip new">NEW</span> 신규 진입</span>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
+      <h2 style="margin:0">히트맵</h2>
+      <label class="small">보기 기준
+        <select id="viewmode" style="margin-left:6px">
+          <option value="momentum">모멘텀 점수</option>
+          <option value="ret">상승률(등락률)</option>
+          <option value="vol">거래대금</option>
+          <option value="riser">순위 급상승</option>
+        </select>
+      </label>
+      <div class="legend" id="hmlegend" style="margin:0"></div>
     </div>
     <div id="treemap"></div>
   </div>
@@ -318,6 +331,43 @@ function colorForChange(ch,isNew){
   if(t>=0){const r=Math.round(75+149*t),g=Math.round(85-28*t),b=Math.round(99-52*t);return `rgb(${r},${g},${b})`;}
   const a=-t,r=Math.round(75-28*a),g=Math.round(85+31*a),b=Math.round(99+125*a);return `rgb(${r},${g},${b})`;
 }
+// 등락률 기반 색 (빨강 상승 / 파랑 하락), ±5% 스케일
+function colorForReturn(rt){
+  if(rt==null) return '#475569';
+  const cap=5, t=Math.max(-1,Math.min(1,rt/cap));
+  if(t>=0){const r=Math.round(75+149*t),g=Math.round(85-28*t),b=Math.round(99-52*t);return `rgb(${r},${g},${b})`;}
+  const a=-t,r=Math.round(75-28*a),g=Math.round(85+31*a),b=Math.round(99+125*a);return `rgb(${r},${g},${b})`;
+}
+function pct(v,d){return v!=null?((v>=0?'+':'')+v.toFixed(d==null?2:d)+'%'):'-';}
+
+// ---------- 히트맵 보기 기준 정의 ----------
+const VIEWS={
+  momentum:{ title:'모멘텀 점수 상위', sortKey:e=>e.score,
+    value:e=>Math.max(e.score,1), color:e=>colorForChange(e.rankChange,e.isNew),
+    line2:e=>`#${e.rankNow}  ${changeLabel(e)}`, line3:e=>`점수 ${e.score.toFixed(0)}`,
+    legend:'color', sizeNote:'크기=모멘텀 점수' },
+  ret:{ title:'등락률(상승률) 상위', sortKey:e=>(e.fltRt==null?-1e9:e.fltRt),
+    value:e=>Math.max((e.trPrc||0)/1e8,0.1), color:e=>colorForReturn(e.fltRt),
+    line2:e=>pct(e.fltRt), line3:e=>`#${e.rankNow}`,
+    legend:'ret', sizeNote:'크기=거래대금' },
+  vol:{ title:'거래대금 상위', sortKey:e=>(e.trPrc||0),
+    value:e=>Math.max((e.trPrc||0)/1e8,0.1), color:e=>colorForReturn(e.fltRt),
+    line2:e=>`${e.trPrc!=null?(e.trPrc/1e8).toFixed(0)+'억':'-'}`, line3:e=>pct(e.fltRt,1),
+    legend:'ret', sizeNote:'크기=거래대금' },
+  riser:{ title:'순위 급상승', sortKey:e=>(e.isNew?9999:(e.rankChange==null?-1e9:e.rankChange)),
+    value:e=>Math.max(e.isNew?15:(e.rankChange||0),1), color:e=>colorForChange(e.rankChange,e.isNew),
+    line2:e=>changeLabel(e), line3:e=>`#${e.rankNow}`,
+    legend:'color', sizeNote:'크기=순위 상승폭' },
+};
+function renderLegend(kind){
+  const el=$('hmlegend');
+  if(kind==='ret'){
+    el.innerHTML='<span>하락</span><span class="bar"></span><span>상승</span>';
+  } else {
+    el.innerHTML='<span>순위 하락</span><span class="bar"></span><span>순위 상승</span>'+
+      '<span style="margin-left:12px"><span class="chip new">NEW</span> 신규 진입</span>';
+  }
+}
 
 // ---------- squarified treemap ----------
 function squarify(items,X,Y,WID,HEI){
@@ -344,10 +394,18 @@ function changeLabel(e){
 }
 function changeCls(e){if(e.isNew)return 'new';if(e.rankChange>0)return 'up';if(e.rankChange<0)return 'down';return 'flat';}
 
-function renderTreemap(list){
+let _allData=[], _topN=50, _view='momentum';
+function renderHeatmap(){
+  const v=VIEWS[_view]||VIEWS.momentum;
+  const list=_allData.slice().sort((a,b)=>v.sortKey(b)-v.sortKey(a)).slice(0,_topN);
+  renderLegend(v.legend);
+  renderTreemapList(list, v);
+}
+function renderTreemapList(list, v){
   const el=$('treemap');el.innerHTML='';
   const W=el.clientWidth, H=el.clientHeight;
-  const data=list.map(e=>({value:Math.max(e.score,1), e}));
+  if(!list.length){el.innerHTML='<div class="small" style="padding:20px">표시할 데이터가 없습니다.</div>';return;}
+  const data=list.map(e=>({value:Math.max(v.value(e),0.01), e}));
   const rects=squarify(data,0,0,W,H);
   const NS='http://www.w3.org/2000/svg';
   const svg=document.createElementNS(NS,'svg');
@@ -360,7 +418,7 @@ function renderTreemap(list){
     const r=document.createElementNS(NS,'rect');
     r.setAttribute('x',rc.x);r.setAttribute('y',rc.y);
     r.setAttribute('width',Math.max(0,rc.w));r.setAttribute('height',Math.max(0,rc.h));
-    r.setAttribute('fill',colorForChange(e.rankChange,e.isNew));
+    r.setAttribute('fill',v.color(e));
     const tip=`${e.name} (${e.code})\n현재순위 ${e.rankNow}위 / ${e.isNew?'신규진입':('이전 '+e.rankPrev+'위, '+changeLabel(e))}\n모멘텀 ${e.score.toFixed(0)} · 등락률 ${e.fltRt!=null?e.fltRt.toFixed(2)+'%':'-'}\n거래대금 ${e.trPrc!=null?(e.trPrc/1e8).toFixed(0)+'억':'-'}`;
     const title=document.createElementNS(NS,'title');title.textContent=tip;
     g.appendChild(r);g.appendChild(title);
@@ -372,13 +430,13 @@ function renderTreemap(list){
       t1.textContent=nm;g.appendChild(t1);
       const t2=document.createElementNS(NS,'text');
       t2.setAttribute('x',rc.x+6);t2.setAttribute('y',rc.y+32);
-      t2.setAttribute('fill','rgba(255,255,255,.85)');t2.setAttribute('font-size','11');
-      t2.textContent=`#${e.rankNow}  ${changeLabel(e)}`;g.appendChild(t2);
+      t2.setAttribute('fill','rgba(255,255,255,.9)');t2.setAttribute('font-size','11');
+      t2.textContent=v.line2(e);g.appendChild(t2);
       if(rc.h>50){
         const t3=document.createElementNS(NS,'text');
         t3.setAttribute('x',rc.x+6);t3.setAttribute('y',rc.y+47);
-        t3.setAttribute('fill','rgba(255,255,255,.7)');t3.setAttribute('font-size','10');
-        t3.textContent=`점수 ${e.score.toFixed(0)}`;g.appendChild(t3);
+        t3.setAttribute('fill','rgba(255,255,255,.72)');t3.setAttribute('font-size','10');
+        t3.textContent=v.line3(e);g.appendChild(t3);
       }
     }
     svg.appendChild(g);
@@ -464,9 +522,10 @@ async function run(){
     nowList.forEach(e=>{const pr=prevRank[e.code];e.rankPrev=pr||null;e.isNew=!pr;e.rankChange=pr?(pr-e.rankNow):null;});
 
     const top=nowList.slice(0,topN);
-    top.forEach(e=>{e.trPrcEok=e.trPrc!=null?e.trPrc/1e8:null;e.r1m=e.rets.w1m;e.r3m=e.rets.w3m;e.r6m=e.rets.w6m;});
-    renderTreemap(top);
-    renderRisers(top);
+    nowList.forEach(e=>{e.trPrcEok=e.trPrc!=null?e.trPrc/1e8:null;e.r1m=e.rets.w1m;e.r3m=e.rets.w3m;e.r6m=e.rets.w6m;});
+    _allData=nowList; _topN=topN;
+    renderHeatmap();
+    renderRisers(nowList);
     _fullData=top; _sortKey='rankNow'; _sortAsc=true; renderFull();
 
     setStatus(`완료 · 확정일 ${now.base.basDt} · 대상 ${nowList.length}종목 중 상위 ${top.length} 표시 · 비교기준 ${prev.base?prev.base.basDt:'N/A'}`);
@@ -500,7 +559,7 @@ $('clearbtn').onclick=()=>{
   for(const k in memCache) delete memCache[k];
   setStatus('가격 캐시를 비웠습니다. 다음 계산 시 새로 받아옵니다.');
 };
-window.addEventListener('resize',()=>{if(_fullData.length)renderTreemap(_fullData.slice(0, _fullData.length));});
+window.addEventListener('resize',()=>{if(_allData.length)renderHeatmap();});
 // ================= 상세 차트 =================
 function ema(arr,n){const k=2/(n+1);const out=new Array(arr.length).fill(null);let prev=null;
   for(let i=0;i<arr.length;i++){const v=arr[i];if(v==null){out[i]=prev;continue;}
@@ -547,15 +606,15 @@ function drawChart(cfg){
   const fmtL=cfg.leftFmt||(v=>v.toFixed(0));
   for(let g=0;g<=4;g++){const val=lr[0]+(lr[1]-lr[0])*g/4;const y=Yl(val);
     const ln=document.createElementNS(NS,'line');ln.setAttribute('x1',PL);ln.setAttribute('x2',W-PR);ln.setAttribute('y1',y);ln.setAttribute('y2',y);
-    ln.setAttribute('stroke','#1e293b');svg.appendChild(ln);
+    ln.setAttribute('stroke','rgba(148,163,184,.28)');svg.appendChild(ln);
     const tx=document.createElementNS(NS,'text');tx.setAttribute('x',PL-5);tx.setAttribute('y',y+3);tx.setAttribute('text-anchor','end');
-    tx.setAttribute('fill','#64748b');tx.setAttribute('font-size','9');tx.textContent=fmtL(val);svg.appendChild(tx);}
+    tx.setAttribute('fill','#94a3b8');tx.setAttribute('font-size','9');tx.textContent=fmtL(val);svg.appendChild(tx);}
   if(cfg.series.some(s=>s.axis==='right')){const fmtR=cfg.rightFmt||(v=>v.toFixed(0));
     for(let g=0;g<=4;g++){const val=rr[0]+(rr[1]-rr[0])*g/4;const y=Yr(val);
-      const tx=document.createElementNS(NS,'text');tx.setAttribute('x',W-PR+4);tx.setAttribute('y',y+3);tx.setAttribute('fill','#64748b');tx.setAttribute('font-size','9');tx.textContent=fmtR(val);svg.appendChild(tx);}}
+      const tx=document.createElementNS(NS,'text');tx.setAttribute('x',W-PR+4);tx.setAttribute('y',y+3);tx.setAttribute('fill','#94a3b8');tx.setAttribute('font-size','9');tx.textContent=fmtR(val);svg.appendChild(tx);}}
   // x labels (sparse)
   const step=Math.max(1,Math.floor(n/6));
-  for(let i=0;i<n;i+=step){const tx=document.createElementNS(NS,'text');tx.setAttribute('x',X(i));tx.setAttribute('y',H-6);tx.setAttribute('text-anchor','middle');tx.setAttribute('fill','#64748b');tx.setAttribute('font-size','9');
+  for(let i=0;i<n;i+=step){const tx=document.createElementNS(NS,'text');tx.setAttribute('x',X(i));tx.setAttribute('y',H-6);tx.setAttribute('text-anchor','middle');tx.setAttribute('fill','#94a3b8');tx.setAttribute('font-size','9');
     const dt=cfg.dates[i];tx.textContent=dt.slice(2,4)+'/'+dt.slice(4,6);svg.appendChild(tx);}
   // hlines
   (cfg.hlines||[]).forEach(h=>{const Y=(h.axis==='right'?Yr:Yl)(h.y);const ln=document.createElementNS(NS,'line');
@@ -750,6 +809,23 @@ $('unlockpw').addEventListener('keydown',ev=>{
   saveSettings(); loadTicker();
   setStatus('저장된 서비스키를 불러왔습니다. [모멘텀 계산하기]를 누르세요.');
 });
+
+// ===== 테마(다크/라이트) =====
+function applyTheme(t){
+  document.body.classList.toggle('light', t==='light');
+  $('themebtn').textContent = t==='light' ? '☀️ 라이트' : '🌙 다크';
+  if(_allData.length) renderHeatmap();  // 셀 외곽선 색이 테마를 따르므로 갱신
+}
+$('themebtn').onclick=()=>{
+  const t=document.body.classList.contains('light')?'dark':'light';
+  localStorage.setItem('etf_theme',t); applyTheme(t);
+};
+applyTheme(localStorage.getItem('etf_theme')||'dark');
+
+// ===== 히트맵 보기 기준 =====
+_view = localStorage.getItem('etf_view') || 'momentum';
+$('viewmode').value = _view;
+$('viewmode').onchange=()=>{ _view=$('viewmode').value; localStorage.setItem('etf_view',_view); if(_allData.length) renderHeatmap(); };
 
 loadSettings();
 syncLevBtn();
