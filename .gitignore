@@ -1,0 +1,17 @@
+# 개인 설정/지시 파일 (이메일·작업규칙 포함 → 공개 금지)
+CLAUDE.md
+
+# 파이썬 빌드 찌꺼기
+__pycache__/
+*.pyc
+
+# 시크릿 (혹시라도 키를 파일로 둘 경우 대비)
+*.key
+apikey*.txt
+secret*
+.env
+
+# OS/에디터
+.DS_Store
+.vscode/
+Thumbs.db
