@@ -1367,8 +1367,17 @@ syncLevBtn();
 loadTicker();
 if(_tkTimer)clearInterval(_tkTimer);
 _tkTimer=setInterval(loadTicker,30000);
-$('pin').focus();
-setStatus((SERVED?'':'⚠ file:// 직접 열기는 데이터가 제한될 수 있어요. start.bat 권장. ')+(ENC_KEY?'비밀번호를 입력하고 Enter 를 누르면 자동으로 시작합니다.':'키가 설정되지 않았습니다.'), !SERVED);
+// EC2 서버에서 실행 시 자동으로 키 로드 + 실행
+if(ONEC2){
+  setStatus('EC2 서버에서 키를 가져오는 중…');
+  fetch('/api/key').then(r=>r.json()).then(d=>{
+    if(d.key){$('apikey').value=d.key; setStatus('키 로드 완료. 자동 실행 중…'); run();}
+    else setStatus('키 로드 실패.',true);
+  }).catch(e=>{ setStatus('키 로드 실패: '+e.message,true); });
+} else {
+  $('pin').focus();
+  setStatus((SERVED?'':'⚠ file:// 직접 열기는 데이터가 제한될 수 있어요. start.bat 권장. ')+(ENC_KEY?'비밀번호를 입력하고 Enter 를 누르면 자동으로 시작합니다.':'키가 설정되지 않았습니다.'), !SERVED);
+}
 </script>
 </body>
 </html>
