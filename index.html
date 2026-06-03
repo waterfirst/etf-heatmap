@@ -314,9 +314,13 @@ const API_BASE = 'https://apis.data.go.kr/1160100/service/GetSecuritiesProductIn
 const STOCK_BASE = 'https://apis.data.go.kr/1160100/service/GetStockSecuritiesInfoService/getStockPriceInfo';
 const SERVED = location.protocol.startsWith('http');  // http(s)로 서빙 중인지 (file:// 경고용)
 const ONLOCAL = (location.hostname==='localhost' || location.hostname==='127.0.0.1');
-// EC2 CORS 프록시 (GitHub Pages에서 사용)
-const EC2_PROXY = 'http://54.180.136.116:8765/proxy?url=';
-function corsWrap(url){ return ONLOCAL ? ('proxy?url='+encodeURIComponent(url)) : (EC2_PROXY+encodeURIComponent(url)); }
+const ONEC2 = (location.port==='8765');  // EC2 프록시 서버에서 서빙 시
+// EC2에서 서빙하면 Same-Origin이라 CORS 없음, GitHub Pages면 EC2 프록시 경유
+function corsWrap(url){
+  if(ONLOCAL || ONEC2) return 'proxy?url='+encodeURIComponent(url);
+  // GitHub Pages: Mixed Content 방지를 위해 직접 호출 시도 (CORS 에러 시 안내)
+  return url;
+}
 // AES-GCM(PBKDF2/SHA-256, 25만회)로 암호화된 공공데이터포털 서비스키. 비밀번호로만 복호화됨.
 const ENC_KEY = "FwAp7HsA746ENTeyz8bBdRg5PxhHvj4q9OCyuUADXAxFiULhWmzbDe3lYVbu0muuKGUZ7tRH+qP/S2gff8Ic8wOh38zgHOF/xR7tm3IKP2ZhUyR81xhB0lRPEtYHnjkuDX/ZLlTsYAEcaIFpY7kuDkIBzSXmpCw4WejCjfi33552FoLC";
 
