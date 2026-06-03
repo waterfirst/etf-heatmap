@@ -29,26 +29,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def handle_proxy(self, parsed):
+        import time
         qs = urllib.parse.parse_qs(parsed.query)
         target = qs.get('url', [None])[0]
         allowed = ('https://apis.data.go.kr', 'https://polling.finance.naver.com')
         if not target or not target.startswith(allowed):
             self.send_error(400, 'invalid url')
             return
-        try:
-            req = urllib.request.Request(target, headers={'User-Agent': 'Mozilla/5.0'})
-            with urllib.request.urlopen(req, timeout=30, context=_ctx) as r:
-                data = r.read()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json; charset=utf-8')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(data)
-        except Exception as e:
-            self.send_response(502)
-            self.send_header('Content-Type', 'text/plain; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(('proxy error: ' + str(e)).encode('utf-8'))
+        
+        last_err = None
+        for attempt in range(5):
+            try:
+                req = urllib.request.Request(target, headers={'User-Agent': 'curl/8.5.0'})
+                with urllib.request.urlopen(req, timeout=30, context=_ctx) as r:
+                    data = r.read()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            except Exception as e:
+                last_err = e
+                # Only log proxy errors for debugging
+                sys.stderr.write(f"Proxy attempt {attempt+1} failed: {e} | target: {target}\n")
+                time.sleep(2)
+                
+        self.send_response(502)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(('proxy error: ' + str(last_err) + ' | target: ' + target).encode('utf-8'))
 
     def log_message(self, *a):
         pass
